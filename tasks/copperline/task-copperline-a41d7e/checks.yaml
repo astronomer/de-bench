@@ -1,0 +1,204 @@
+# The deliverable is a written answer, so every check reads RESPONSE.md. The
+# seven of them grade seven separate decisions: which month September 2025 is
+# and where the processor boundary sits inside it, how many payments the month
+# holds, what they are worth per currency, whether the legacy feed was opened
+# at all, what was dropped as shadow traffic, what a correction is dated to,
+# and what the deletes and the orders come to. A reply that lands one figure by
+# luck passes one of the seven.
+#
+# Patterns are matched case-insensitively with re.search, so they are written
+# loose on purpose: a figure may carry a comma or not, and a label may be bold,
+# bracketed or punctuated any way the writer likes. What each pattern pins is a
+# figure, never a phrasing.
+#
+# Each figure is fenced by `(?<![0-9,])` and `(?![0-9]|[ ,][0-9])` so that it
+# cannot be satisfied by a longer number that happens to start or end with the
+# same digits. Two of the figures below really do collide that way: 2,542 sits
+# inside 2,542,239,396, which is the cents a reply may well quote beside it.
+#
+# WHERE THE FIGURES COME FROM
+# ---------------------------
+# All of them are read straight off a full-profile world. Nothing here is
+# authored and nothing is planted: this is the shipped data under the three
+# documents the ticket names.
+#
+#   python -m gen_copperline --timeline worlds/copperline/timeline.yaml \
+#       --planted worlds/copperline/planted.yaml --db W.duckdb \
+#       --landing L --profile full
+#   python tools/gen_copperline_load_fixtures.py \
+#       --fixtures worlds/copperline/workspace/fixtures --db W.duckdb --landing L
+#
+# The month is `raw.fiscal_calendar` where fiscal_year = 'FY2025' and
+# fiscal_period = 8: 2025-08-31 to 2025-10-04. The boundary is
+# `raw.pay_processor_windows`: halcyon to 2025-08-31, meridian from 2025-09-01.
+# The two populations the rest of the figures come out of are
+#
+#   halcyon  = raw.pay_halcyon_settlements, txn_datetime::DATE = '2025-08-31'
+#   meridian = raw.pay_meridian_settlements, event_type = 'captured'
+#              AND restates_event_id IS NULL
+#              AND event_time_utc::DATE BETWEEN '2025-09-01' AND '2025-10-04'
+#
+# with the Halcyon amount parsed as round(amount::DECIMAL(18,2) * 100) and its
+# currency taken from `merchant_acct` through `raw.merchant_regions` and
+# `raw.market_config.billing_currency`.
+#
+# The build these were read off reproduces every exact population the world's
+# own answer key records — 3,960 and 1,380 on the two account books, 20 and 20
+# restatements at the 30- and 31-day boundary, 120 into a closed month, 13
+# surviving legacy jobs, 290 store rows over 268 stores.
+#
+# Every figure below was then read a second time out of the baked warehouse a
+# trial is scored against, by a throwaway task carrying a pytest verifier of
+# the queries above. It passed on all of them — the two month dates, the two
+# window dates, 2,542 and 84,933, the three currency totals, 849, 44,404,
+# 1,455, 261, 77,904 and 2,321 — and was deleted. The figures are the shipped
+# world's, not a local build's.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# THE MONTH, AND THE BOUNDARY INSIDE IT. September 2025 is FY2025 P8, which
+# runs 2025-08-31 to 2025-10-04 on the 4-5-4 calendar. Meridian becomes
+# authoritative on 2025-09-01, so the month's first day belongs to Halcyon and
+# the other thirty-four to Meridian.
+#
+#   calendar September   loses 2025-08-31 and the four October days. The
+#                        Meridian part alone comes out at 74,095 payments
+#                        rather than 84,933.
+#   2025-07-01           the day Meridian's feed appeared, which the runbook
+#                        says twice is not the day it became authoritative.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'FY[\s-]?2025[\s-]?P\s?0?8\b'
+  - '2025-08-31'
+  - '2025-10-04'
+  - '2025-09-01'
+
+# THE COUNT. 87,475 payments — 2,542 on the Halcyon day and 84,933 on the
+# Meridian days. Both figures are required, because the month's total alone
+# does not show that the boundary was applied: the reply has to say how much of
+# the month the old processor still owns.
+#
+#   134,421   both feeds added across the whole month. PRM-1 and B-8 both warn
+#             about it in as many words, and it is half again the month.
+#    88,923   the corrections counted as payments of their own on top of the
+#             originals they restate.
+#   169,866   the `authorized` events counted as well. B-1 says an
+#             authorization is the issuer holding funds and is not money.
+#    74,095   calendar September, Meridian only.
+#
+# A reply that works the whole month off Meridian, ignoring the windows table,
+# lands 87,475 as well: the two feeds carry the same 2,542 payments on
+# 2025-08-31, to the cent and per currency, because that is what the shadow
+# quarter was for. It cannot produce check 4, which is Halcyon's alone.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])87[,\s]?475(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])2[,\s]?542(?![0-9]|[ ,][0-9])'
+
+# THE MONEY, PER CURRENCY. USD 3,100,537,937, GBP 771,950,330, EUR 952,225,300,
+# in integer cents, in the currency each payment was taken in. Adding the three
+# is meaningless and the ticket says not to, so no total is graded.
+#
+#   3,116,971,586 / 763,984,167 / 943,757,814   Halcyon's blank currency read
+#             as USD. 849 of the boundary day's 2,542 rows arrive blank and the
+#             merchant account is what fills them in.
+#   3,075,719,892 / 763,984,167 / 943,757,814   the blank-currency rows dropped
+#             instead.
+#   3,089,931,630 / 769,847,879 / 949,400,659   the soft-deleted rows dropped,
+#             against R-6.
+#   1,210,706.14   the Halcyon day summed as a number rather than parsed to
+#             cents: dollars, and a float, for the one money column in the
+#             world that arrives as text.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])3[,\s]?100[,\s]?537[,\s]?937(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])771[,\s]?950[,\s]?330(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])952[,\s]?225[,\s]?300(?![0-9]|[ ,][0-9])'
+
+# THE LEGACY FEED WAS ACTUALLY OPENED. 849 of the boundary day's rows carry no
+# currency, and Halcyon is the only feed in the world with that column, so this
+# figure cannot be reached from Meridian. It is what separates a reply that
+# read the windows table and then worked both feeds from one that took Meridian
+# for the whole month and got the right total by the wrong route.
+#
+# The count is tied to what it counts, so a stray 849 elsewhere in the file
+# does not satisfy it.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((?<![0-9,])849(?![0-9]|[ ,][0-9])[^0-9\n]{0,80}(currenc|blank|empty|null|missing|unset|not set)|(currenc|blank|empty|null|missing|unset|not set)[^0-9\n]{0,80}(?<![0-9,])849(?![0-9]|[ ,][0-9]))'
+
+# WHAT WAS LEFT OUT. 46,946 payments sit inside the month and are not counted:
+# 44,404 Halcyon rows dated 2025-09-01 to 2025-09-30, and the 2,542 Meridian
+# shadow copies of the boundary day the count reads off Halcyon. (This label
+# has flipped twice. A bare count cannot settle it — both feeds carry 2,542
+# payments on 2025-08-31 by design, so counting either feed prints the same
+# number. The discriminating query is the join: every one of Halcyon's 2,542
+# boundary-day rows has a Meridian `captured` event on the shared reference —
+# 2,542 of 2,542 on `merchant_ref = order_ref` — and since check 2 counts the
+# day from Halcyon, the copy left out is Meridian's. Meridian's raw event
+# count that day is 2,608; the 66 extra are restatement events B-7 folds into
+# their originals, which is why the excluded side is 2,542 at the payment
+# grain.) Both halves are required — the boundary cuts in two directions on
+# the same month and a reply that only drops the old feed has seen one of
+# them.
+#
+#   44,404   only Halcyon's month-after rows dropped, with Meridian's shadow
+#            day left in. That is the reading that puts the switchover on the
+#            day the second feed appeared.
+#        0   both feeds added, so nothing was left out at all.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])46[,\s]?946(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])44[,\s]?404(?![0-9]|[ ,][0-9])'
+
+# THE CORRECTIONS. 1,455 of the month's payments are restated by a later event.
+# R-5 dates a correction to the day it restates, not the day it arrives, and
+# B-7 says to take the highest revision of an event.
+#
+#   1,448   the corrections that LAND in the month, which belong to earlier
+#           months. That is the same fact read off the wrong date, and it is
+#           the number a reply gets by filtering on the correction's own
+#           `event_time_utc`.
+#       0   `restates_event_id` never looked at.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])1[,\s]?455(?![0-9]|[ ,][0-9])'
+
+# THE DELETES, AND THE ORDERS. 261 of the month's Meridian rows carry a
+# `deleted_at` and stay in, per R-6, which says a deleted row is neither
+# filtered out nor treated as missing. 80,225 orders sit behind the month's
+# 87,475 payments — 77,904 on the Meridian side and 2,321 on the Halcyon day —
+# and either the whole-month figure or the Meridian one satisfies the second
+# pattern, because a reply may reasonably scope the order question to the side
+# where the bridge answers it exactly.
+#
+#      0     the deleted rows filtered out at the top of the query, which also
+#            moves all three currency figures in check 3.
+#   87,475   payments counted as orders. 7,029 orders in the month paid with
+#            two card payments.
+#   1,269,154 orders reached by joining `order_ref` to `raw.orders` with no
+#            date window. Seven digits cannot hold an order key that runs past
+#            180 million, so one reference names about three orders across the
+#            estate.
+#
+# The reference plus a date is the only join to `raw.orders` there is, and it
+# is exact here: the reference and the attempt's own date match every one of
+# the month's payments to one order and leave none over, at any window from
+# three days to thirty. `raw.payment_intents.order_id` carries the processor's
+# own order number, does not resolve against `ORD-########` and will not join;
+# counted rather than joined it gives the same 77,904, which is why both
+# figures are the same and either route is honest.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((?<![0-9,])261(?![0-9]|[ ,][0-9])[^0-9\n]{0,80}(delet|removed)|(delet|removed)[^0-9\n]{0,80}(?<![0-9,])261(?![0-9]|[ ,][0-9]))'
+  - '(?<![0-9,])(80[,\s]?225|77[,\s]?904)(?![0-9]|[ ,][0-9])'

@@ -1,0 +1,5 @@
+checks:
+- kind: scoring_primitive
+  name: import_ok
+- kind: scoring_primitive
+  name: triggers_outside_bundle

@@ -1,0 +1,174 @@
+# The deliverable is a written answer, so every check reads RESPONSE.md. The
+# eight of them grade eight separate decisions: which month May 2026 is, and one
+# per step of the worked month that books anything. Getting the headline right
+# by copying Ironwood passes one of the eight.
+#
+# Patterns are matched case-insensitively with re.search, so they are written
+# loose on purpose: a figure may carry a comma or not, and a label may be bold,
+# bracketed or punctuated any way the writer likes. What each pattern pins is a
+# figure, never a phrasing. A step that a writer may reasonably show either
+# netted or in two halves is matched either way, by alternation.
+#
+# WHERE THE FIGURES COME FROM
+# ---------------------------
+# Every figure below is produced by two independent readings of
+# `docs/finance-policy.md`, which agree on all of them to the cent:
+#
+#   1. tools/copperline_oracle/recognition.py — the exact-Decimal model.
+#      Run over a full-profile world:
+#        python -m gen_copperline --timeline worlds/copperline/timeline.yaml \
+#            --planted worlds/copperline/planted.yaml --db W.duckdb \
+#            --landing L --profile full
+#        python tools/gen_copperline_load_fixtures.py \
+#            --fixtures worlds/copperline/workspace/fixtures --db W.duckdb --landing L
+#        PYTHONPATH=tools python -m copperline_oracle.recognition W.duckdb
+#      The month's figure is the row's `recognized_cents`; the step figures are
+#      the component columns, summed over the five entities of FY2026-P04.
+#
+#   2. tools/copperline_ledger_workings/close.py, the controller's working:
+#        python tools/copperline_ledger_workings/close.py --db W.duckdb \
+#            --month FY2026-P04
+#      which prints the same eight steps per entity.
+#
+# The two books also reproduce the shipped ledger,
+# `fixtures/finance/ledger_monthly.csv`, on all 74 entity-months. That file
+# carries the per-entity total for FY2026-P04 and nothing else — no step, no
+# component — which is why the build-up is the part of this answer that cannot
+# be copied.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# THE MONTH. May 2026 is FY2026-P04, which runs 2026-05-03 to 2026-05-30 —
+# `raw.fiscal_calendar`, and CAL-1's 4-5-4 pattern. It closed 2026-06-05, the
+# 5th business day of June, which is the date REV-8's worked month states.
+# Working calendar May instead moves the largest step by a billion cents:
+# step 3 over 2026-05-01..2026-05-31 is 10,005,977,807 rather than
+# 9,006,594,420.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'FY[\s-]?2026[\s-]?P\s?0?4\b'
+  - '2026-05-03'
+  - '2026-05-30'
+  - '2026-06-05'
+
+# THE TOTAL. 8,916,119,657 cents, the eight steps added. It is also the sum of
+# the five FY2026-P04 rows of `raw.finance_ledger`, so this check alone does
+# not separate a derivation from a copy — the seven step checks below do that.
+# It is here because it convicts every reply that never gets to a policy at
+# all: the invoice headers for the fiscal month add to 8,810,754,248 net of
+# tax and 9,611,320,890 with it, and for calendar May to 9,788,455,852 and
+# 10,677,860,901. The figure has to sit against the claim it answers, so a
+# reply that lands elsewhere and mentions this number in passing fails.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'recogni[sz]ed[^0-9\n]{0,40}revenue[^0-9\n]{0,40}8[,\s]?916[,\s]?119[,\s]?657'
+
+# STEP 3, goods and freight: 9,006,594,420 cents. 48,406 invoice lines with no
+# `service_end`, in full on the invoice date, at `line_total_cents` converted
+# once at the invoice-date rate (REV-1, REV-7). It is 101% of the month's
+# figure and every other step is a correction to it, so the three ways of
+# getting it wrong are the three most expensive mistakes on the ticket:
+#
+#   8,162,397,121   `line_total_cents - tax_cents`. REV-1's last paragraph
+#                   says tax is not inside that column; the plan invoice
+#                   header is net + tax and reads as though it were.
+#   8,820,828,042   no FX conversion, every amount taken as USD (REV-7).
+#   10,005,977,807  calendar May instead of the fiscal month.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '9[,\s]?006[,\s]?594[,\s]?420'
+
+# STEP 4, marketplace: 79,621,294 cents net — 81,070,221 of commission and
+# fulfilment fees less 1,448,927 of returns posted in the month (REV-14).
+# Either presentation passes; the net alone, or the two halves together.
+#
+#   80,418,718   cancelled orders left in. They carry a ship-confirmation
+#                date and a commission and never shipped, so REV-14 books
+#                nothing for them; leaving them in adds 797,424 cents.
+#   79,589,117   `ship_confirmed_at` read as a UTC calendar day rather than
+#                converted to the head-office date first. About one order in
+#                seven changes month.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(79[,\s]?621[,\s]?294|81[,\s]?070[,\s]?221[\s\S]{0,400}1[,\s]?448[,\s]?927)'
+
+# STEP 5, gift cards: 44,755,895 cents — 24,147,257 of redemptions and
+# 20,608,638 of breakage aging out in the month (REV-12). The ticket asks for
+# the breakage on its own, so both figures are required; the net or the
+# redemption half satisfies the first pattern.
+#
+#   67,909,175   the escheat column ignored, so every card with a balance at
+#                24 months breaks. 20 of the 66 rows of
+#                `raw.gift_card_jurisdictions` carry `escheat_applies`, and
+#                dropping the test more than doubles the breakage, to
+#                43,761,918.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(44[,\s]?755[,\s]?895|24[,\s]?147[,\s]?257)'
+  - '20[,\s]?608[,\s]?638'
+
+# STEPS 6 AND 7, the two subtractions. Credit memos issued in the month,
+# 217,620,158 cents, each converted at its invoice's rate rather than its own
+# issue-date rate (REV-5). Write-offs of disputes that closed in the
+# customer's favour, 5,329,569 cents (REV-10).
+#
+#   10,559,955   `upheld` read as upheld for the customer and written off at
+#                `disputed_cents`. REV-10 names four statuses and only
+#                `settled` books, at `settled_cents`; 15 upheld disputes
+#                resolved in the month and none of them books.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '217[,\s]?620[,\s]?158'
+  - '5[,\s]?329[,\s]?569'
+
+# STEPS 1 AND 2, the trade book. 3,712,115 cents of current-era ratable lines
+# allocated daily under REV-1 and REV-2, and 4,503,826 of legacy-era plans at
+# the fiscal-month grain REV-11 gives them — 70,325 of annual prepay and
+# 4,433,501 billed monthly. Either presentation passes.
+#
+# 3,740,503 also passes, paired with a step 8 of -146,554: the policy fixes
+# what steps 1 and 8 NET for a line voided mid-month, not the gross split.
+# Booking the voided lines' May days in step 1 and reversing the whole
+# recognized-to-date in step 8 moves the same 28,388 cents through both and
+# lands the same month. The first matrix run proved a faithful reading does
+# this: an agent tied the ledger to the cent per entity with the gross split
+# and failed only these two patterns. Adjudicated after that run; see
+# worlds/copperline/PLANTED.md.
+#
+#   4,550,633   the legacy lines cut to daily grain. That is what
+#               `int_recognition_schedule.sql` in the shipped dbt project
+#               does, and the worked month warns about it in as many words:
+#               "the difference is nearly always step 1 against step 2".
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(3[,\s]?712[,\s]?115|3[,\s]?740[,\s]?503)'
+  - '(4[,\s]?503[,\s]?826|4[,\s]?433[,\s]?501)'
+
+# STEP 8, the REV-6 reversals: 118,166 cents net — or 146,554 gross, paired
+# with the step-1 alternate above. A refund requested on or before day 14
+# voids the schedule and the whole recognized-to-date amount reverses on the
+# day of the request; a refund on day 15 only stops it going forward.
+#
+#         0   the void branch never fired, which is what happens to anybody
+#             who reads `raw.credit_memos` or `raw.returns` as REV-6's
+#             population instead of `raw.plan_lines.cancelled_on`. The total
+#             then comes out at 8,916,237,823.
+#   63,213   the same lines cut to daily grain, per the step-2 note above.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # Paired to the step-1 presentation by lookahead: the net and gross
+  # spellings are each fine, but graded independently they accepted a mix —
+  # 3,740,503 gross in step 1 beside 118,166 net here — that does not sum to
+  # the total. A reply printing both consistent pairs still passes.
+  - '(\A(?=[\s\S]*3[,\s]?712[,\s]?115)(?=[\s\S]*\b118[,\s]?166\b)|\A(?=[\s\S]*3[,\s]?740[,\s]?503)(?=[\s\S]*\b146[,\s]?554\b))'

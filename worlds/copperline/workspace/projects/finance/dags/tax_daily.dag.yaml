@@ -1,0 +1,55 @@
+# Tax by entity and market, every morning.
+#
+# The model does the work; this lands it, checks it and writes it out. Tax is
+# not the finance policy's subject — the tax team keeps its own guidance and it
+# is not held in this repository — so nothing here decides a rate.
+#
+# Market attributes come from the market-setup export, which
+# `docs/runbooks/market-setup.md` names as the system of record. A market added
+# there and not here shows up as a missing row in the check below rather than
+# as a quiet zero.
+
+dag_id: fin_tax_daily
+schedule: "0 7 * * *"
+description: tax by entity and market
+tags: [finance, tax, mart]
+
+default_args:
+  owner: finance
+  retries: 2
+
+steps:
+  wait_for_revenue:
+    blueprint: sensor_wait
+    asset: marts.daily_revenue
+    partition_col: ds
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    poke_interval: 300
+    timeout: 7200
+    mode: reschedule
+
+  build:
+    blueprint: dbt_select
+    depends_on: [wait_for_revenue]
+    command: run
+    select: "marts.tax_daily"
+    target: prod
+    vars:
+      run_date: "{{ macros.ds_add(ds, -1) }}"
+
+  check:
+    blueprint: cents_check
+    depends_on: [build]
+    table: marts.tax_daily
+    columns: [taxable_cents, tax_cents]
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    at_least: 5
+
+  publish:
+    blueprint: partition_export
+    depends_on: [check]
+    source: marts.tax_daily
+    layer: marts
+    name: tax_daily
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [entity, market_code]

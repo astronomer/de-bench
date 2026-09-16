@@ -1,0 +1,99 @@
+# The bug is one table name in `sc_inventory_snapshot_daily.VALUATION`:
+# `FROM raw.inventory_snapshots` instead of `FROM
+# copperline.raw.inventory_snapshots`. `include/lib/warehouse.connect()` attaches
+# the frozen Northwave copy first on the search path, that copy carries
+# `raw.inventory_snapshots` under the same name and the same columns, and it
+# holds one date — the day the namespace froze. So the day filter matches
+# nothing, the insert writes nothing, the step returns 0 and the run goes green.
+# `marts.inventory_position`, built from the same table three tasks earlier and
+# qualified, is right, which is what makes the shape look like a valuation
+# problem rather than a source problem.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.inventory_snapshots` and `raw.dept_cost_complement` in the
+# same session, with the same aggregation the shipped build makes of them.
+#
+# WHY NOTHING RUNS THE DAG. `marts.*` is derived and the world ships the landed
+# half only (AGENTS.md, "The warehouse"), and the first task of this DAG loads
+# the day's Corvid file, which the landing tree keeps for three weeks. Both
+# graded days in FY2026 sit outside that window, so a run would fail on the
+# load rather than on the valuation. The verifier makes the one table the
+# valuation writes and calls the patched build directly.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code change    verifier: the three days
+#   `nwv.raw.inventory_snapshots` — the frozen book     verifier: the frozen copy
+#     named on purpose                                  holds one date, so the
+#                                                       three days stay empty
+#   the search path reordered in include/lib            do_not_modify; it would
+#                                                       also break every read
+#                                                       the acquired book is for
+#   the day filter dropped so the table fills           verifier: the last test,
+#                                                       which sees 201 days
+#   the numbers written in by hand for April and May    verifier: 2026-01-11,
+#                                                       named nowhere in the
+#                                                       ticket, and the rebuild
+#   the fix scoped to the months finance asked for      verifier: 2026-05-12
+#   only the FY2026 branch repaired                     verifier: 2026-01-11
+#   the method or the grain changed to make rows appear verifier: every day is
+#     (valuing the position instead of the snapshot,    compared row for row
+#      picking the complement another way)              against the snapshot
+#   the warehouse opened with duckdb.connect directly   file_lacks; warehouse.py
+#                                                       says nothing outside
+#                                                       include/lib opens it
+#   a step deleted to make the run quiet                dag_structure
+#   the DAG broken                                      dag_parses
+#
+# WHAT PASSES, and is meant to. Setting the search path on the connection inside
+# this DAG — `SET search_path = 'copperline'` before the insert — leaves the
+# library alone, reads the live warehouse and produces the right rows. It is a
+# worse fix than qualifying the name, because it changes state for everything
+# else on that connection, but the ticket asks for the rows and this delivers
+# them. Convicting it would convict an answer the ticket accepts.
+#
+# The graded days are 2026-04-15, 2026-05-12 and 2026-01-11. The ticket names
+# April and May and none of the three by name. All three sit outside the world's
+# reserved windows, and 2026-01-11 sits before the FY2026 valuation change so
+# the cost branch is graded as well as the retail one.
+replay: []
+
+checks:
+
+# The tree still imports, and the DAG is still there.
+- kind: dag_parses
+  dag_id: sc_inventory_snapshot_daily
+
+# The house shape holds: load the A-class count, take the weekly network file,
+# build the position, report coverage, check the contract, value the day. A
+# valuation that "works" because the position or the contract check was deleted
+# is not a fix, and the verifier alone cannot see the difference.
+- kind: dag_structure
+  dag_id: sc_inventory_snapshot_daily
+  task_ids:
+  - load_aclass_snapshot
+  - load_network_snapshot
+  - build_position
+  - check_coverage
+  - check_contract
+  - build_valuation
+  operators:
+    load_aclass_snapshot: CsvToWarehouseOperator
+    build_position: PythonOperator
+    build_valuation: PythonOperator
+
+# The substance. See verifier/test_outputs.py — three days, the two rules the
+# ticket states, and a rebuild.
+- kind: pytest_verifier
+  file: test_outputs.py
+
+# `include/lib/warehouse.py` opens the warehouse and nothing outside
+# `include/lib/` opens it directly. Reaching around the house connection to dodge
+# the attach reads the right rows for the wrong reason, and leaves the next
+# query in this file reading the frozen copy again. Comments and docstrings are
+# stripped before this is matched, so writing about it in prose is free.
+- kind: file_lacks
+  path: projects/supply/dags/sc_inventory_snapshot_daily.py
+  patterns:
+  - 'duckdb\.connect'
+  - 'import duckdb'

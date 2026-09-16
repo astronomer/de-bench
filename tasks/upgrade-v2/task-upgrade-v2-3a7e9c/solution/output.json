@@ -1,0 +1,8 @@
+{
+  "airflow": "3.2",
+  "providers": {
+    "google": "22",
+    "cncf-kubernetes": "10"
+  },
+  "rationale": "Execution-verified against Airflow 3.2: the current pins (google 8, cncf-kubernetes 7) do not install. google's first AF3.2-capable major is 16 (8-15 fail to resolve/install), and cncf-kubernetes needs 9+ (7/8 fail to import); any google 16-22 with cncf-kubernetes 9-10 installs cleanly, so bumping to the latest (google 22, cncf-kubernetes 10) is correct."
+}

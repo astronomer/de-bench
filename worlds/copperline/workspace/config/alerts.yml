@@ -1,0 +1,96 @@
+# Data health alerts. Consumer C-10 in `docs/report-registry.md`, bound by
+# `contracts/alerting.md`. Read by `gro_alerting_daily` at 11:00.
+#
+# The file IS the definition, per §AL-3. A subject exists because it is here,
+# with the table as a string, the check, the threshold and the team that gets
+# paged. Nothing is defined in the DAG, so this is the one place to look to
+# find out what is watched — and the one place to change a threshold.
+#
+# Because the tables are strings, nothing in dbt's graph or Airflow's can see
+# this consumer. `docs/lineage.md` lists it under every table it reads.
+#
+# Checks:
+#   freshness   hours between the newest row and the end of the day. Fails high.
+#   row_count   rows landed for the day. Fails LOW.
+#   null_rate   per cent of the day's rows with `column` empty. Fails high.
+
+subjects:
+  - table: raw.web_events
+    check: freshness
+    timestamp_column: load_time
+    threshold: 26
+    owner: growth
+    note: the nightly producer posts up to twenty-six hours behind the event
+
+  - table: ops.session_daily
+    check: row_count
+    threshold: 1
+    owner: growth
+
+  - table: raw.ads_spend_daily
+    check: freshness
+    timestamp_column: loaded_at
+    threshold: 30
+    owner: growth
+    note: a platform that misses one morning has until the next one
+
+  - table: raw.comp_prices
+    check: row_count
+    partition_column: observed_on
+    threshold: 200
+    owner: growth
+
+  - table: marts.gmv_daily
+    check: row_count
+    threshold: 1
+    owner: commerce
+
+  - table: marts.comp_sales_daily
+    check: row_count
+    threshold: 1
+    owner: finance
+
+  - table: raw.pos_sales_header
+    check: freshness
+    timestamp_column: loaded_at
+    threshold: 30
+    owner: commerce
+
+  - table: raw.carrier_scans
+    check: null_rate
+    column: scan_status
+    partition_column: scan_date
+    threshold: 2
+    owner: supply
+
+  - table: marts.inventory_position
+    check: row_count
+    threshold: 1
+    owner: supply
+
+  - table: marts.customer_360
+    check: null_rate
+    column: region
+    partition_column: updated_at
+    threshold: 1
+    owner: customer
+
+  # TODO: three subjects below name a team that no longer exists under that
+  # name. They have not paged anybody since the reorganisation and nobody has
+  # decided who inherits them.
+  - table: raw.email_events
+    check: freshness
+    timestamp_column: event_time_utc
+    threshold: 30
+    owner: lifecycle
+
+  - table: marts.audience_segments
+    check: row_count
+    threshold: 1
+    owner: lifecycle
+
+  - table: raw.seo_rankings
+    check: row_count
+    partition_column: observed_on
+    threshold: 100
+    owner: acquisition

@@ -1,0 +1,132 @@
+# `projects/finance/lib/revenue.py::build_margin` names three columns the shared
+# models do not have — `s.category_id`, `c.order_line_id` and
+# `c.landed_cost_cents` — so `fin_margin_daily` has never put a row in
+# `marts.category_margin`. That much is loud: the first read of the two models
+# says which columns exist. What the loud part hides is the choice underneath
+# it, and there are three:
+#
+#   1. THE KEY. `order_line_id` is a line ordinal with twelve values that
+#      repeats in every order (`int_order_lines_discounted` says so). The costed
+#      model does not carry it at all, so the only key the two models share is
+#      `order_line_key`. A join on the order and the SKU comes out right on a
+#      day where no order repeats a SKU and wrong on a day where one does; a
+#      join on the order alone fans every line onto every line of its order.
+#   2. THE COST COLUMN. The costed model publishes `unit_cost_cents` — one
+#      unit's cost, and the first thing its docstring names as the source — and
+#      `extended_cost_cents`, that cost times the line's quantity, rounded once.
+#      A line's cost is the second. Summing the first LEAVES NET SALES EXACTLY
+#      RIGHT and understates cost by the average quantity, so `tie_to_sales`
+#      passes, `check_cents` passes, `check_rows` passes, the run goes green and
+#      the margin is several times too wide. This is the silent one.
+#   3. THE CATALOG. `dim_product` carries a narrower SKU range than the order
+#      book sells — its own docstring says every fact joining it has to keep the
+#      unmatched lines — so an inner join drops about nine tenths of the day.
+#      That one the tie does catch, which is why the ticket states the tie.
+#
+# Nothing here holds an authored value. The verifier computes the day's cost
+# from `raw.order_lines` and `raw.orders` in the same session, takes the day's
+# net sales from the shared model the tie is written against, and takes the row
+# ceiling from the catalog's own category count.
+#
+# WHY NOTHING RUNS THE DAG. Every relation `build_margin` reads is derived and
+# the world ships the landed half of the warehouse only (AGENTS.md, "The
+# warehouse"): the three `int` models and `marts.dim_product` are made by the
+# 04:00 dbt build, and `marts.category_margin` has no DDL anywhere in the
+# workspace. The verifier makes the four relations out of `raw.*` with the
+# shipped models' own projections and calls the patched build directly, which
+# grades the same code in seconds instead of a 143-model dbt run. It also
+# removes the second reason a run would say nothing: a trial's patch never
+# carries anything under `include/data`, so a partition an agent published by
+# hand is a partition no check can read.
+#
+# THE WRONG ANSWERS, and what convicts each. Every row that names a failure
+# count was measured by running the verifier against that answer.
+#
+#   nothing delivered, or a note and no code change  verifier: 13 of 16 fail on
+#                                                    the untouched tree
+#   `unit_cost_cents` summed as the line's cost      verifier: 3 failed — the
+#     (net sales still ties to the cent)             cost test on all three
+#                                                    days. The tie test passes,
+#                                                    as it does in the pipeline
+#   the catalog joined inner, misses dropped         verifier: 6 failed — the
+#                                                    tie and the cost, all three
+#   the costed model joined on the order and the SKU verifier: 2 failed, both on
+#                                                    2025-12-09, where an order
+#                                                    repeats a SKU. The other
+#                                                    two days pass it, which is
+#                                                    why there are three
+#   the costed model joined on the order alone       verifier: 6 failed
+#   the catalog read from `raw.pim_product_versions` verifier: 6 failed — the
+#     without picking one version per SKU            tie and the cost, on every
+#                                                    day. Reading the versions
+#                                                    and picking the current one
+#                                                    passes, and is meant to
+#   the uncatalogued money bucketed by SKU           verifier: 3 failed — the
+#     rather than under one category                 row ceiling, which is the
+#                                                    catalog's own category
+#                                                    count plus one
+#   the fix scoped to a date the agent picked        verifier: 6 failed — three
+#                                                    days, none of them named in
+#                                                    the ticket
+#   the day appended rather than replaced            verifier: the rebuild test
+#   net sales or landed cost rebuilt from `raw`      verifier: both figures are
+#     rather than read from the shared models        graded against the source,
+#                                                    so a second derivation that
+#                                                    agrees is accepted and one
+#                                                    that does not is convicted
+#   the tie or a check deleted to get a green run    dag_structure
+#   the DAG or the module broken                     dag_parses
+#   the shared models edited to carry the columns    do_not_modify: dbt/**
+#     the code names
+#
+# WHAT PASSES, and is meant to. The bucket the uncatalogued lines land under is
+# not graded by name: a spelling, a NULL or a code all pass, because the ticket
+# asks for one row per category and says nothing about what to call the rest.
+# Grading a spelling would convict an answer the ticket accepts.
+#
+# `build_daily` is out of scope and untouched here. OPS-412
+# (task-copperline-d38a7f) grades that function in the same file; this task's
+# solution carries the shipped `build_daily` verbatim, and d38a7f's verifier
+# passes against it.
+#
+# The graded days are 2026-01-13, 2025-12-09 and 2026-04-21. The ticket names no
+# date at all. All three are ordinary trading days, all three sit outside the
+# world's reserved windows (2026-06-01..09 and 2025-08-31..2025-10-04) and
+# outside the never-grade tail (2026-06-10..14).
+replay: []
+
+checks:
+
+# The tree still imports, and the DAG is still there.
+- kind: dag_parses
+  dag_id: fin_margin_daily
+
+# The house shape holds: wait, rebuild, check the money, check the shape, tie to
+# the shared model, publish. A day that "publishes" because the tie or the row
+# check was deleted is not a fix, and the money checks cannot see the
+# difference.
+- kind: dag_structure
+  dag_id: fin_margin_daily
+  # A step added to check the new join is a better DAG, not a worse one, and the
+  # ticket does not forbid one. The guard here is against deletion.
+  allow_extra: true
+  task_ids:
+  - wait_for_lines
+  - build
+  - check_cents
+  - check_rows
+  - tie_to_sales
+  - publish
+  operators:
+    wait_for_lines: PythonSensor
+    build: PythonOperator
+    check_cents: PythonOperator
+    check_rows: PythonOperator
+    tie_to_sales: PythonOperator
+    publish: PythonOperator
+
+# The substance. See verifier/test_outputs.py — three guards on the world, then
+# three days graded on the tie, the cost, the row arithmetic and the grain, and
+# a rebuild.
+- kind: pytest_verifier
+  file: test_outputs.py

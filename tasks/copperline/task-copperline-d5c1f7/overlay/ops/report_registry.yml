@@ -1,0 +1,42 @@
+covers: the rendered finance reports only; docs/report-registry.md is the company
+  list
+reports:
+  account_rollup_monthly:
+    grain:
+    - fiscal_month
+    - entity
+    - customer_id
+    lands_at: exports/reports/account_rollup_monthly
+    owner: finance
+    publisher: fin_report_publish
+    reads: marts.account_rollup
+    title: Trade accounts by reported revenue
+  comp_sales_weekly:
+    grain:
+    - ds
+    - region
+    lands_at: exports/reports/comp_sales_weekly
+    owner: finance
+    publisher: fin_report_publish
+    reads: marts.comp_sales_daily
+    title: Comparable store sales by region
+  monthly_revenue_by_entity:
+    grain:
+    - fiscal_month
+    - entity
+    lands_at: exports/reports/monthly_revenue_by_entity
+    owner: finance
+    publisher: fin_report_publish
+    reads: marts.revenue_recognized_monthly
+    title: Recognised revenue by entity and fiscal month
+  revenue_daily_summary:
+    grain:
+    - ds
+    - channel
+    lands_at: exports/reports/revenue_daily_summary
+    owner: finance
+    publisher: fin_report_publish
+    reads: marts.daily_revenue
+    title: Booked revenue by day and channel
+source: config/reports.yml
+source_sha256: ca8aa9238edbe6eecdfa8a019fa2d72a1441938562631929ab8baf197518933c

@@ -1,0 +1,4 @@
+{
+  "incompatible": true,
+  "acceptable_resolutions": ["airflow_bump", "provider_downgrade"]
+}

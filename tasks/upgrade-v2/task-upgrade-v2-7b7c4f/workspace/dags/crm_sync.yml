@@ -1,0 +1,24 @@
+campaign_ingest:
+  default_args:
+    start_date: 2024-06-01
+    retries: 2
+  schedule_interval: '@daily'
+  catchup: false
+  tasks:
+    fetch_campaigns:
+      operator: airflow.operators.bash.BashOperator
+      bash_command: echo fetch_campaigns
+    normalize_campaigns:
+      operator: airflow.operators.bash.BashOperator
+      bash_command: echo normalize_campaigns
+      dependencies: [fetch_campaigns]
+
+contact_dedupe:
+  default_args:
+    start_date: 2024-06-01
+  schedule_interval: '0 */6 * * *'
+  catchup: false
+  tasks:
+    dedupe:
+      operator: airflow.operators.bash.BashOperator
+      bash_command: echo dedupe

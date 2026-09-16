@@ -1,0 +1,136 @@
+# The rate intake is wrong in two places, and the second only becomes visible
+# once the first is fixed. That is the task.
+#
+#   1. `land.columns` declares `base_currency` and `rate_ppm`. `raw.fx_rates`
+#      carries neither. `columns` types the CSV read, so the read is four
+#      columns against a five-column file and DuckDB refuses to sniff it. Past
+#      that, `INSERT ... BY NAME` would leave three NOT NULL columns unfilled.
+#      This is the error the ticket quotes.
+#   2. `coverage` groups by `base_currency`. The rate table quotes one way into
+#      USD and the base is not a column: there is no USD row on the table at
+#      all, and `stg_reference__fx_rates` is where USD is minted at 1,000,000.
+#      So the rollup is a binder error — invisible today, because `coverage`
+#      depends on `land` and `land` has never finished.
+#
+# NOTHING HERE IS AUTHORED. The column names and types the load must declare
+# are read off `raw.fx_rates` in the same session, and the number the coverage
+# row must carry is counted from the same table for three ordinary days. The
+# verifier's first test fails loudly if that table ever stops having the shape
+# the ticket is about.
+#
+# WHY NOTHING RUNS THE DAG. `replay` is empty and there is no `dag_runs` check,
+# for a reason worth writing down. The first step is a `FileSensor` on
+# `landing/fx/dt=<D>/rates.csv` with a three-hour timeout, and the world ships
+# no `landing/fx` tree — the generator writes eleven landing sources and the
+# rate feed is not one of them. So `airflow dags test` cannot reach `land` on
+# any date, before the fix or after it, and a run check would grade the sensor's
+# timeout rather than the ticket. The ticket says the file arrives and the wait
+# clears, which is the fiction the table's 6,034 rows already assert; what is
+# graded is the job against the table, which is what the ticket asks for and
+# what the agent can see. Everything the fix does is checked by executing the
+# coverage step's own query, assembled from its own keys, against the warehouse.
+#
+# THE THREE DAYS, none of them named in the ticket, none inside a reserved
+# window or the never-grade tail: 2025-11-03, 2026-03-16 and 2026-04-20. The
+# feed sends every currency every day, so they are three draws from one shape
+# rather than three edges — they are there so a fix that works on one day has to
+# work on the days either side of it.
+#
+# THE WRONG ANSWERS, and what convicts each. Every line below was run.
+#
+#   nothing changed                            2 tests: the columns and the
+#                                              coverage count
+#   `rate_ppm` renamed, `base_currency` kept   the columns test: the load still
+#                                              declares a column the table does
+#                                              not carry
+#   the `columns` block deleted                the columns test: the sniffer
+#                                              guesses, and the kind's own
+#                                              docstring says why that is not an
+#                                              answer
+#   a type mistyped (`rate_to_usd_ppm` as      the columns test. Type aliases do
+#     VARCHAR, `published_at` as TIMESTAMPTZ)  not count as mistakes: both sides
+#                                              are normalised through DuckDB, so
+#                                              STRING for VARCHAR passes
+#   the coverage step deleted                  4 tests, starting with the job's
+#                                              four kinds
+#   the table renamed to match the yaml        3 tests. The warehouse is rebuilt
+#     (a new table, or a rename in dbt)        from the image at scoring, so the
+#                                              rename does not survive, and the
+#                                              yaml then names a table with no
+#                                              columns at all
+#   a currency list written into the step      the coverage count: three
+#     (`where: currency_code IN (...)`)        currencies against the seven the
+#                                              day carries
+#   `group_by: [currency_code]`                the coverage count: a 1 on every
+#                                              row, which tells a reader nothing
+#                                              about whether the morning arrived
+#   the coverage column renamed                the coverage count. The ticket
+#                                              says keep `currency_count`
+#   `mode: replace` or `partition_col` lost    the replace test
+#     while fixing the columns
+#   one step moved to `{{ ds }}`               the same-day test: it would read a
+#                                              morning the file has not landed
+#   the job hand-written as a `.py`            the rendered-job test, and four
+#                                              more behind it
+#
+# WHAT PASSES, AND SHOULD. Two readings of the coverage step are defensible and
+# the ticket settles neither, so neither is convicted:
+#
+#   * `group_by: [source]` and `group_by: [rate_date]` both put one row a day in
+#     the coverage table carrying the day's currency count. The feed has one
+#     source, so they are the same row. `[published_at]` is a third spelling of
+#     it, since the stamp is one value per day.
+#   * `agg: count` over `currency_code` rather than `count_distinct`. The table
+#     is keyed on (rate_date, currency_code), so on this feed the two are the
+#     same number, and the ticket asks for the number, not the spelling.
+#
+# AND ONE THING THE FIX STILL CANNOT DO, which the ticket says out loud rather
+# than promise. `rollup` writes through `warehouse.delete_insert`, which does
+# not create its target, and no DDL file or generator makes `ops.fx_rate_coverage`
+# — nor `ops.comp_price_coverage`, nor any other rollup target in the estate.
+# So a fixed coverage step would still die on the missing table if anybody ran
+# it. That is estate-wide and its repair belongs in `include/lib/`, which is
+# protected. The ticket therefore asks for the step to count the day, tells the
+# agent to leave the table alone, and says the job keeps its four steps — so
+# adding a DDL step, or a sixth blueprint kind to run one, is out of scope and
+# `dag_structure` says so.
+#
+# AND WHAT IS DELIBERATELY NOT GRADED. The DAG-level comment claims rows before
+# the currency cutover "carry a NULL currency and are USD by construction",
+# which is true of the Halcyon settlement feed and of nothing on this table. It
+# is a paste from one story into another and it points the wrong way. Repairing
+# it is welcome and leaving it alone costs nothing; no check turns on a comment.
+replay: []
+
+checks:
+
+# The tree still imports. A yaml error here is an import error on
+# projects/finance/dags/blueprints.py, which takes the other two rendered
+# finance DAGs down with it — so they are checked too.
+- kind: dag_parses
+  dag_id: fin_fx_rates_intake
+- kind: dag_parses
+  dag_id: fin_tax_daily
+- kind: dag_parses
+  dag_id: fin_accrual_freight
+
+# The house shape holds: wait for the drop, land it, count what came, publish
+# the day. Dropping a step is the other way to make the morning quiet.
+- kind: dag_structure
+  dag_id: fin_fx_rates_intake
+  task_ids:
+  - wait_for_file
+  - land
+  - coverage
+  - publish
+  operators:
+    wait_for_file: FileSensor
+    land: CsvToWarehouseOperator
+    coverage: PythonOperator
+    publish: PythonOperator
+
+# The substance. See verifier/test_outputs.py — the load against the rate
+# table's own columns, and the coverage step's own query against three days.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600

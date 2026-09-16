@@ -1,0 +1,141 @@
+# The ticket has a code half and a reading half and they are graded apart.
+#
+# THE CODE HALF. `projects/supply/lib/run_calendar.py` does not exist in the
+# shipped tree and nothing in this deployment can answer the old scheduler's run
+# calendar. Two records settle every expected value and the verifier reads both
+# in the same session:
+#
+#   legacy/autosys/copperline.jil    68 live `insert_job:` blocks and 9
+#                                    `delete_job:` lines. Eight jobs carry
+#                                    `run_calendar: retail_2026`; walking
+#                                    `box_name:` puts EIGHTEEN under it. One
+#                                    more carries `retail_2025`, a calendar the
+#                                    estate does not hold, under `status: OI`.
+#   raw.market_calendar              `market_code = 'US'`, 2022-01-30 to
+#                                    2027-01-30. Its 2026 trading days are the
+#                                    export's 251 exactly, which is what makes
+#                                    the ticket's "read the warehouse instead"
+#                                    a fair instruction rather than a swap of
+#                                    one answer for another.
+#
+# `ds` is the day the run FIRES — `CONVENTIONS.md` "Dates" says so and the
+# export's own header says `BUSDATE` is the day before it. Over 2026 the set of
+# days that ARE calendar days and the set whose day-before is a calendar day
+# differ on 110 of the 365, so the gate cannot be right about both readings by
+# accident.
+#
+# THE READING HALF. Three answers, and each of them is a decision an agent has
+# to make rather than a figure to copy:
+#
+#   18 and 8               the closure against the grep. The ten in between are
+#                          the three ties, the four packs and the close step,
+#                          each of them a job that never names the calendar.
+#   Friday and Saturday    the box starts the morning after the business date it
+#                          carries, so a Friday's tie-out would start on a
+#                          Saturday and a Saturday's on a Sunday, and neither is
+#                          a calendar day. The obvious wrong answer — Saturday
+#                          and Sunday — is what the calendar gates, not what the
+#                          nightly loses.
+#   history_complete       `NOT failed` on every row of `ops.load_control`, so
+#                          it repeats `load_status` and settles nothing.
+#                          `stg_ops__load_control` says it means the job has
+#                          backfilled to the start of its range; the table does
+#                          not bear that out.
+#
+# What the battery convicts, by wrong answer:
+#
+#   the eight declaring boxes taken as the answer   verifier test 2, and check 3
+#   `cpl.util.archive.logs` counted in the same     verifier tests 2 and 3
+#     list as the eighteen
+#   the eighteen names typed into the module        verifier test 3: the retired
+#                                                   calendar has to answer from
+#                                                   the same walk
+#   the export read for the gate                    verifier test 5: it names
+#                                                   one year and the estate has
+#                                                   run outside it since 2022
+#   a weekday-and-holiday rule written out in       verifier test 6: a computed
+#     Python instead of a calendar read             rule answers for 2031 and
+#                                                   the calendar does not
+#   the gate asked about the day the run OWNS       verifier test 4
+#   a date off the end answered `False`             verifier test 6
+#   `is_due` in the bridge repaired and reused      do_not_modify covers
+#     instead of the gate written                   `sc_autosys_bridge.py`, and
+#                                                   the verifier loads the module
+#                                                   the ticket pins by path
+#   the .cal or the .jil edited into shape          do_not_modify covers
+#                                                   `legacy/**`
+#   "the tie-outs skip Saturday and Sunday"         check 4
+#   `history_complete` taken at the staging         check 5
+#     model's word
+#
+# What is NOT convicted, on purpose:
+#
+#   * `calendared_jobs` may hand back a list, a tuple or a set, and `is_run_day`
+#     may take a `date` as well as a string. The ticket pins the names and the
+#     answers, not the types.
+#   * The module may cache both records; the ticket says so in as many words.
+#   * A parser that reads a `delete_job:` name as a job it defines is NOT
+#     caught. All nine sit at the top of the export with no box above them, so
+#     they land ungoverned and the closure does not move. Saying so rather than
+#     claiming a conviction the tests cannot make.
+#   * Which table the gate reads is not pinned. `raw.market_calendar` is the one
+#     place in this warehouse that carries a trading-day flag per market, so
+#     tests 4 and 5 settle it on answers; a reading that reproduces those
+#     answers from somewhere else is a right answer.
+#   * The RESPONSE may keep the hole or close it. The ticket asks what the
+#     tie-outs have never run for, not what to do about it, and check 4 grades
+#     the finding rather than the recommendation.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# Collateral guard. The gate is a library module and this is the DAG that will
+# import it; an agent that repairs the bridge on the way past has already
+# failed `do_not_modify`, but a supply tree that no longer imports takes eleven
+# other DAGs with it and nothing else here would notice.
+- kind: dag_parses
+  dag_id: sc_autosys_bridge
+
+# The substance of the code half. See verifier/test_run_gate.py — six tests, and
+# every expected job, day and boundary is read out of the read-only export or
+# out of `raw.market_calendar` in the same session.
+- kind: pytest_verifier
+  file: test_run_gate.py
+
+# 1. The two counts. Eighteen is the closure and eight is the grep, and the
+# ticket asks for both on purpose: an agent that only ever saw the eight cannot
+# write the first figure, and one that reports eighteen without the eight has
+# not shown the plan why the two disagree. `\beight\b` is bounded so that
+# "eighteen" cannot answer for it.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((\b18\b|eighteen)[^\n]{0,80}(jobs?|boxes)|(jobs?|boxes)[^\n]{0,80}(\b18\b|eighteen))'
+  - '((\b8\b|\beight\b)[^\n]{0,80}(carry|carries|declare|name|names|say|says|spell|spells|own line|line of their own|run_calendar)|(carry|carries|declare|declares|name|names|say|says|spell|spells|run_calendar)[^\n]{0,80}(\b8\b|\beight\b))'
+
+# 2. The days the tie-outs have never covered, and the arithmetic behind them.
+# The first pattern wants both days together, which is what rules out the reply
+# every reading of the calendar alone produces: Saturday and Sunday. The second
+# wants the offset that makes it so — the box starts the morning after the
+# business date it carries. The third wants the claim stated rather than the
+# days merely mentioned.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(friday[^\n]{0,140}saturday|saturday[^\n]{0,140}friday)'
+  - '(busdate|yesterday|the day before|the previous (day|night)|a day behind|one day behind|ds *[-−] *1|the night before|the morning after|day it owns)'
+  - '(never (ran|run|runs|started|starts|happen|happens|happened|exist|existed)|has never|have never|no (tie|tie-out|tie out|recon|reconciliation|run)[^\n]{0,60}(friday|saturday)|(friday|saturday)[^\n]{0,80}(never|no tie|not tied|missing|absent|left out))'
+
+# 3. The control-table column. `history_complete` is `NOT failed` on every row,
+# so it is `load_status` under a second name; the reply has to put the two
+# columns against each other rather than repeat what the staging model claims
+# about backfills. Naming only one of the two columns is not an answer, which
+# is why both are pinned.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'history_complete'
+  - 'load_status'
+  - '(same|copy|copies|repeat|repeats|restate|restates|identical|duplicat|mirror|equival|equal|nothing (more|new|else)|tells us nothing|says nothing|adds nothing|no (more|extra|new) information|derived from|spelled twice|redundant|not[^\n]{0,40}backfill|never[^\n]{0,40}backfill)'

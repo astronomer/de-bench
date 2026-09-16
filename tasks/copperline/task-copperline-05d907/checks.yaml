@@ -1,0 +1,119 @@
+# The OMS's parquet orders export changed shape on 2026-01-01, inside the 400
+# live days RET-2 keeps: `customer_ref` became `customer_id` and
+# `promo_allocation_cents` appeared, both on the same night. Nothing in the
+# workspace documents it. `raw.orders` kept `customer_ref` throughout, so the
+# rename lives in this one feed —
+# `docs/runbooks/customer-id-migration.md`'s open item is the only breadcrumb,
+# and it says the export renames the column and nothing else.
+#
+# `fin_trade_statement_monthly` reads the export a fiscal period at a time and
+# selects `customer_ref`. DuckDB resolves a glob's columns off the first file
+# and only complains when a projected column is missing from a later one, so
+# the job was correct until a period held a file from both sides of the change
+# — and it has failed at every close since, first on FY2025-P11 and then on
+# every all-new period after it. That is the ticket.
+#
+# THE PERIOD THAT DECIDES IT. FY2025-P11 runs 2025-11-30 to 2026-01-03, so the
+# export changed shape on the thirty-third of its thirty-five days. Both arms
+# of the ticket land there and nowhere else:
+#
+#   the account   7,262 of the period's 8,075 trade orders name the account
+#                 `customer_ref` and the other 813 name it `customer_id`
+#   the promotion the OMS published a promotion figure for three of the
+#                 thirty-five days, so a straight sum reports 47,528,946 cents
+#                 of allocated promotion against a period whose true figure the
+#                 export does not carry at all
+#
+# Every figure above is read from the landing files, and so is every expected
+# result: the verifier rolls the export up itself in the same session and
+# takes every period boundary from `raw.fiscal_calendar`. Nothing here is
+# authored.
+#
+# WHY A VERIFIER RATHER THAN DAG RUNS. `marts.trade_statement` is derived and a
+# fresh warehouse does not carry it, and no other job in the world reads it. A
+# `dag_runs` check would grade one period and pay for a scheduler; the verifier
+# grades four in seconds. It also removes the second reason a run would say
+# nothing: a trial's patch never carries anything under `include/data`, so a
+# period an agent republished by hand is a period no check can read.
+#
+# THE GRADED PERIODS, each named by the morning the DAG would fire:
+#
+#   2025-11-30  FY2025-P10, one shape throughout, and the last period the
+#               shipped code got right — the control
+#   2026-01-04  FY2025-P11, the period the shape changed inside
+#   2026-02-01  FY2025-P12, the first whole period in the new shape
+#   2026-05-03  FY2026-P3, four periods later and named nowhere
+#
+# The ticket names none of the four. It pastes an error naming files in March,
+# which is a fifth period. All four sit outside the world's reserved windows
+# (2026-06-01..09 and FY2025-P8) and inside the export's live 400 days.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code    delivered; verifier
+#   `union_by_name = true` and nothing else     the fix DuckDB's own error
+#     suggests. The read binds and every        message recommends. verifier:
+#     pre-2026 row has a null account           the build raises on the NOT NULL
+#                                               account, and if that is dropped
+#                                               too, the blank-account test and
+#                                               the P11 row comparison
+#   `customer_ref` kept, `union_by_name` added  the same, mirrored: verifier,
+#                                               on the two all-new periods
+#   `WHERE customer_id IS NOT NULL` bolted on   verifier: P11 comes out with 813
+#                                               of its 8,075 orders
+#   the glob narrowed to the period's own       verifier: P11 holds both shapes
+#     files                                     whatever the glob is narrowed to
+#   the promotion summed straight               verifier: the promotion test —
+#                                               P11 reports a figure for a
+#                                               period the export never covered
+#   `coalesce(sum(promotion), 0)`               verifier: the promotion test —
+#                                               P10 and P11 report zero where
+#                                               the cell must be empty
+#   the promotion left off the statement        verifier: the column check
+#   the period taken as a calendar month        verifier: P11 is five weeks and
+#                                               P10 four, so every row moves
+#   a period appended rather than replaced      verifier: the rebuild test
+#   the DAG or the module broken                dag_parses
+#   the graph gutted to make a run go green     dag_structure
+#
+# WHAT PASSES, and is meant to. The ticket states an outcome, not a mechanism.
+#
+#   - Reading the two eras as two selects and unioning them is a correct fix
+#     and passes. So is a single `union_by_name` read with the two names
+#     coalesced. So is any other route to the same rows.
+#   - Taking the money from `raw.orders` and the promotion from the export
+#     passes: `raw.orders` reproduces the export exactly at this grain, so the
+#     orders and the cents tie. It is a stretch of "the OMS's own figures" and
+#     the ticket asks for the export, but the statement it produces is right
+#     and nothing here convicts it. Taking the promotion from anywhere but the
+#     export does not pass — `raw.promo_applications.discount_cents` is a
+#     different number and fails the promotion tie.
+replay: []
+
+checks:
+
+# The tree still imports and the DAG is still there.
+- kind: dag_parses
+  dag_id: fin_trade_statement_monthly
+
+# The house shape holds: only fire on a close, wait for the last file, build,
+# publish. A statement that "builds" because the short circuit or the sensor
+# went away is not a fix.
+- kind: dag_structure
+  dag_id: fin_trade_statement_monthly
+  task_ids:
+  - check_period_closed
+  - wait_for_export
+  - build_statement
+  - publish_statement
+  operators:
+    check_period_closed: ShortCircuitOperator
+    wait_for_export: FileSensor
+    build_statement: PythonOperator
+    publish_statement: PythonOperator
+
+# The substance. See verifier/test_outputs.py — four periods, the account on
+# every line, the promotion rule, and a rebuild.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

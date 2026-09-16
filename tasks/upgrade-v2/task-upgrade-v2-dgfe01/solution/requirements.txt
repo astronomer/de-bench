@@ -1,0 +1,2 @@
+apache-airflow==3.1.5
+dag-factory==1.0.1

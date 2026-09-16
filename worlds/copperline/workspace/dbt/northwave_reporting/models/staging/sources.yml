@@ -1,0 +1,16 @@
+version: 2
+
+sources:
+  - name: nwv
+    schema: nwv
+    tables:
+      - name: accounts
+      - name: orders
+      - name: order_lines
+      - name: items
+      - name: branches
+      - name: invoices
+      - name: payments
+      - name: reps
+      - name: price_book
+      - name: credit_notes

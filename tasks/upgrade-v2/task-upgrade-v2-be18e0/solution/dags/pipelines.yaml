@@ -1,0 +1,13 @@
+pipelines:
+  - name: daily_orders
+    schedule: "@daily"
+    tasks:
+      - id: extract_orders
+        handler: extract_orders
+      - id: load_orders
+        handler: load_orders
+  - name: hourly_inventory
+    schedule: "@hourly"
+    tasks:
+      - id: sync_inventory
+        handler: sync_inventory

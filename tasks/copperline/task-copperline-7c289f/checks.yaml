@@ -1,0 +1,230 @@
+# The defect is one line of
+# `dbt/copperline_analytics/models/customer/feature_customer_daily.sql`:
+#
+#     where source_id_shape = 'current'
+#
+# `source_id_shape` on `marts.dim_customer` says which format an account's id
+# arrived in — `current` for a `C-######`, `legacy` for a pre-cutover
+# `CUST####`, `northwave` for an `NWA-#####`. It is not a version. The
+# dimension is not versioned either: it carries no `valid_from`, no `valid_to`,
+# and one row per account. So the line drops the acquired book — every account
+# that came over at the acquisition and that no merge decision folds onto a
+# Copperline account. The world ships it that way; nothing here is planted.
+#
+# WHY IT IS THE TRAP IT IS. The line reads exactly like the current-version cut
+# `contracts/feature-store.md` §FS-1 forbids, and three files in the world say
+# so in as many words — FS-1's own Notes, the DAG's `doc_md`, and the module
+# docstring of `projects/customer/lib/features.py` all warn that "filtering the
+# dimension to its current version is the shortest way to a full table and is
+# what FS-1 forbids". A reader who takes the line at that reading has two ways
+# to go wrong and both are live:
+#
+#   * treat the filter as load-bearing — FS-1 compliance that must not be
+#     touched — and put the acquired half back through a second source. Every
+#     obvious second source is `raw.nwv_accounts` or its staging view, which
+#     carries all 1,400 acquired accounts including the 300 a person has
+#     already decided are Copperline customers. That is the FY2025 double
+#     count the dimension's own docstring is about.
+#   * take the filter as the FS-1 breach itself and replace it with an as-of
+#     join through a validity window. `marts.dim_customer` has no validity
+#     window, so the model does not build.
+#
+# It is silent by construction. FS-2's grain holds over a smaller population,
+# `check_contract` passes over a smaller population, and `check_as_of` compares
+# the rows it finds against the dimension and never asks which rows are absent.
+#
+# THE SHAPE OF THE ANSWER. The dimension already resolves both books to one row
+# an account: a decided merge folds the Northwave account onto the Copperline
+# key and the Copperline row survives, so the `northwave` rows left over are
+# exactly the accounts nobody has decided are somebody else. Reading the
+# dimension whole is the population and keeps the grain by construction.
+#
+# THE FIGURES IN THE TICKET. "About four thousand rows" and the 5,040 from
+# NW-214 are both measured on the shipped world. `raw.customers` holds 4,000
+# accounts of which 20 carry a `deleted_at` and staging drops them, so the
+# master's Copperline half is 3,980 and the shipped file lands 3,980 rows a
+# day — measured, on a world built at the small profile, which keeps every
+# entity and scales only the fact volumes, and whose build asserts the two
+# account books to the row at either profile. `raw.nwv_accounts` holds 1,400 and
+# `ops.merge_candidates` holds 300 pairs, every one of them decided by a named
+# reviewer, so the acquired half the master keeps is 1,100 and the whole book
+# is 5,080. NW-214 (`task-copperline-9eabaf`) counts the *active* half of the
+# same two books and lands 5,040; this ticket cites that number as the one
+# planning is using and grades nothing against it. The ticket names no other
+# count and no date.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier reads the account book off
+# `marts.dim_customer` in the same session and checks it against
+# `raw.customers`, `raw.nwv_accounts` and `ops.merge_candidates` before it
+# grades anything. The counts and the booked money come from `raw.orders` with
+# the two filters staging applies. The acquired half's trailing windows are not
+# asserted to be zero on an author's say-so: a guard reads the order book for
+# those ids first and the substance test only claims what the guard found.
+# `marts.dim_customer` and everything under
+# `dbt/copperline_analytics/models/shared/` are held shut, so no answer can
+# move what it is measured against.
+#
+# HOW THIS COMPOSES WITH CUS-509 (`task-copperline-995347`), which is open on
+# the same model file. That ticket owns the date a refund comes off a line —
+# `net_sales_cents` and `net_sales_cents_30d` on an account that has traded.
+# This one owns which accounts are on the file. The split is enforced on both
+# sides: nothing here reads either money column on a trading account, and the
+# only rows where this file does read them are the acquired accounts, whose
+# money is zero under either reading because they have no order in
+# `raw.orders`. The two are one line apart in the same CTE.
+#
+# Run and measured, on a world built at the small profile:
+#
+#   this solution                against 995347's verifier   21 pass, the five
+#                                                            money tests fail
+#                                                            — it does not fix
+#                                                            the netting and is
+#                                                            not meant to
+#   995347's solution            against this verifier       18 pass, the four
+#                                                            population tests
+#                                                            fail — same, the
+#                                                            other way round
+#   both fixes in one model      against this verifier       22 of 22 pass
+#   both fixes in one model      against 995347's verifier   25 of 26 pass; the
+#                                                            one failure is
+#                                                            995347's own
+#                                                            oracle guard on
+#                                                            2026-02-22, which
+#                                                            needs a day where
+#                                                            some account's
+#                                                            money moves and
+#                                                            does not get one
+#                                                            at a twentieth of
+#                                                            the return volume
+#
+# So a tree that fixes both passes both, which is the property that matters.
+#
+# WHY DBT RUNS, AND WHY THERE IS NO PREPARE STEP. The world ships the landed
+# half of the warehouse only (`AGENTS.md`, "The warehouse"), so the mart does
+# not exist until dbt has made it. The verifier builds the leaf and its
+# upstream itself and then rebuilds the leaf once per run date. It is not a
+# `prepare:` command, because a prepare failure is tolerated: a build starved
+# of the single DuckDB writer would leave every test grading relations that
+# were never made, and read as a wrong answer. The verifier retries it, the
+# later goes on the profile's larger `memory_limit`, and it reports dbt's own
+# words if it still will not go.
+#
+# No DAG replays: `cus_features_daily`'s own steps read `marts.dim_customer`
+# for a validity window the dbt dimension does not carry, so the DAG cannot run
+# in this world and the ticket is not about the DAG.
+#
+# THE FOUR GRADED DAYS, and none of them in the ticket:
+#
+#   built at 2026-04-21   graded on 2026-04-21, 2026-04-08
+#   built at 2026-02-10   graded on 2026-02-10, 2026-01-28
+#
+# Two of the four are days the run did not run on and the second run date is ten
+# weeks earlier, so a population repaired for the top row of the spine or cut to
+# one window shows. The population itself does not vary by day — the dimension
+# has no validity window — so the second run date is insurance rather than a
+# second reading. All four sit outside the reserved windows (2026-06-01..09 and
+# 2025-08-31..2025-10-04) and outside the never-grade tail (2026-06-10..14), and
+# so does every window and lookback read for them: the earliest date any of
+# these tests reaches is 2025-10-13, nine days after fiscal P8 closes.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no model change   verifier: the population
+#                                                      test, on all four days,
+#                                                      1,100 accounts missing
+#                                                      each time. Run and
+#                                                      measured
+#   the filter left standing and the acquired half     verifier: the population
+#     added somewhere downstream of the model          test — a trial's patch
+#                                                      never carries anything
+#                                                      under include/data, and
+#                                                      the parquet is written
+#                                                      from the mart
+#   the filter inverted to `<> 'current'`              verifier: the population
+#                                                      test — 3,980 accounts
+#                                                      missing. Run and
+#                                                      measured
+#   the acquired half unioned in from                  verifier: the population
+#     `raw.nwv_accounts` or `stg_customer__nwv_        test — the 300 decided
+#     accounts`                                        merges come back as
+#                                                      second rows under their
+#                                                      Northwave ids, so the
+#                                                      day carries 300 ids the
+#                                                      master does not hold.
+#                                                      Run and measured
+#   the same, and the status left as the acquired      verifier: the attributes
+#     book spells it — `inactive` on 20 of the 1,100,  test, on the same 20.
+#     which is not one of the three values             Run and measured
+#     contracts/customer_360.yml pins, and which the
+#     master maps
+#   the acquired half joined through                   verifier: the grain test
+#     `ops.merge_candidates` without collapsing, or    — the resolver read whole
+#     read from `int_customer_resolved` whole, which   lands 5,440 rows for
+#     carries the `legacy` shape as a second row per   5,140 accounts, and takes
+#     account                                          the counts and the
+#                                                      attributes with it. Run
+#                                                      and measured
+#   the sixty crosswalk orphans put on the file as     verifier: the population
+#     well — `CUST####` ids with no current account    test. CUS-233 owns the
+#                                                      pre-cutover ids, the
+#                                                      master does not hold
+#                                                      them, and the ticket
+#                                                      names the acquired book.
+#                                                      Run and measured
+#   the acquired accounts re-keyed onto Copperline     verifier: the population
+#     ids by e-mail, tax id or confidence              test. The ticket says an
+#                                                      acquired account keeps
+#                                                      its own id, and NW-214
+#                                                      already settled that an
+#                                                      undecided candidate is
+#                                                      not a merge
+#   the acquired rows given a history from             verifier: the empty-
+#     Northwave's own frozen order book                windows test
+#   the acquired rows left with nulls where the        verifier: the empty-
+#     table's own `coalesce` puts a zero               windows test
+#   the trailing windows rebuilt while the rows        verifier: the counts test
+#     were being added
+#   the filter replaced with an as-of join through     verifier: the build fails
+#     a validity window the dimension does not have    and says so with dbt's
+#                                                      own words
+#   the population widened by editing                  do_not_modify: that is
+#     `dim_customer` instead                           C-8's table and a
+#                                                      platform contract binds
+#                                                      it
+#   the grain test or the contract check deleted       nothing here reads them,
+#                                                      and deleting them wins
+#                                                      nothing: they were green
+#                                                      over the defect
+#
+# DEFENSIBLE ALTERNATIVES THAT PASS, and should:
+#
+#   * `where source_id_shape in ('current', 'northwave')` rather than the
+#     filter dropped. The dimension holds those two shapes and no other, so the
+#     two land the same rows. It restates the dimension's own rule, which is
+#     thinner than reading it whole, and it is not wrong here.
+#   * The acquired half added as a second CTE off `dim_customer` and unioned
+#     on, rather than the one filter widened. Nothing here reads the model's
+#     structure, only the rows it lands.
+#   * `source_book` used as the discriminator instead of `source_id_shape`.
+#     They agree on every row of this dimension.
+#   * CUS-509's netting fixed at the same time. The money columns this file
+#     reads are the acquired half's, which are zero either way, so a tree that
+#     fixes both passes here. Run and measured — see the composition note above.
+#   * A wider table, or the acquired rows carrying a tier. The verifier selects
+#     the graded columns by name and ignores the rest, and `tier_as_of` is
+#     nullable, is not in `contracts/feature_customer_daily.yml`, and is not
+#     read.
+
+replay: []
+
+checks:
+
+# The substance: the day's population against the customer master over both
+# books, the grain, the attributes, the acquired half's empty windows, and the
+# figures on the accounts that were already on the file — over four days across
+# two run dates. The verifier stands the warehouse up itself, from raw; see
+# verifier/test_outputs.py and the note above on why no prepare step does it.
+# The timeout is headroom for the retries, not the measured cost.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 1200

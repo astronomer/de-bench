@@ -1,0 +1,9 @@
+checks:
+- kind: scoring_primitive
+  name: no_deprecated_imports
+- kind: scoring_primitive
+  name: schedule_interval_replaced
+- kind: scoring_primitive
+  name: no_deprecated_context_vars
+- kind: scoring_primitive
+  name: structural_match_taskids

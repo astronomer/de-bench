@@ -1,0 +1,114 @@
+# Three statements under projects/commerce/sql/ join the returns feed and the
+# promotion register to the order line on `order_line_id` alone. That column is a
+# line ordinal — twelve values over 9,430,789 lines — so the close subtracts
+# every L-01 refund in the feed from every L-01 line. `booked_cents` is untouched
+# by it, so `tie_to_orders` still ties and `check_economics_grain` still passes,
+# and the orphan count that was written to catch exactly this matches everything
+# and cannot find anything. That is the whole task: a break that leaves every
+# step of the pipeline green.
+#
+# Nothing here is an authored figure. The verifier reads the order book, the
+# returns feed and the promotion register in the same session that runs the
+# statements, so an edit to the tree cannot move the answer, and its first two
+# tests grade the world rather than the answer: if the ordinal ever becomes
+# unique, or a return stops answering to exactly one line, the seam is gone and
+# they fail first instead of letting the rest grade a difference that no longer
+# exists.
+#
+# The close cannot be run in this warehouse — `close_price_book` reads
+# `marts.dim_product` and nothing builds it — so the verifier writes the two
+# inputs itself, `staging.close_priced` and `staging.returns_landing`, rather
+# than by running the tree's own upstream statements. An oracle that builds its
+# input with the tree under test grades the answer with the answer. The prompt
+# says the close will not run and whose ticket that is.
+#
+# What each wrong answer does:
+#
+#   clamp the negative — greatest(net, 0) over the same join
+#       fails the netting test. The join still takes the feed's whole ordinal
+#       off the line: 10,112 of 10,113 lines on 2026-02-18 go negative under it,
+#       so a clamp reads as a fix and lands nowhere near the line's own returns.
+#
+#   net only the authorisations raised on the close date
+#       fails the netting test. No authorisation is ever raised on the day of
+#       its own order — the feed's reach is 3 to 60 days, measured over the
+#       whole feed — so every line comes out at its booked figure and the 165 to
+#       204 lines a day that really did have returns are wrong. A second bound
+#       `?` fails outright as well: `build_step` passes the close date once.
+#
+#   fix the join AND cap the refund at the line — least(refund, line_total)
+#       PASSES, and should. Matched on the pair, no refund in the feed exceeds
+#       its own line on either graded day, so the cap is a no-op.
+#       `int_net_sales_lines` caps for the tax that comes back with a refund,
+#       and an agent that reads the shared model and copies it is not wrong.
+#
+#   join raw.returns straight onto the line, without adding it up first
+#       PASSES. The feed holds one authorisation per line over all 154,341 rows
+#       — the second oracle test asserts it — so there is nothing to fan out and
+#       the numbers come out the same. The grain test is there for a repair that
+#       does fan out, not to convict this one.
+#
+#   close the gap by moving booked_cents
+#       fails the booking test. Booked is what the close ties to `raw.orders`
+#       and it is the reason this went unseen; a repair may not pay for itself
+#       out of it.
+#
+#   fix close_line_economics and stop
+#       fails the promotion test and the orphan tests. The ticket says the same
+#       mistake is in more than one statement and says to find every one.
+#
+#   rewrite the promotion push-down to stop double counting, or to spread the
+#   header discount over the lines
+#       fails the promotion test. This is the one place the checks convict a
+#       better piece of engineering, and it is deliberate: the ticket says in
+#       terms not to change what the push-down adds, names MER-312 as the owner
+#       of that question, and asks only for the line it lands on. The ticket is
+#       the contract.
+#
+#   delete the promotion push-down, or make it a no-op
+#       fails the promotion test, which requires the day's line applications to
+#       have landed somewhere.
+#
+#   make the orphan count report every authorisation, or every one whose ordinal
+#   it cannot place
+#       fails the clean-night test. The real feed resolves on the pair, every
+#       row of it, so a working check counts nought on a night with nothing
+#       wrong in it.
+#
+#   delete a statement, or empty it
+#       the verifier asserts each file is present and not blank before it runs.
+#
+#   drop the orphan step out of returns_daily.dag.yaml
+#       NOT convicted, and it cannot be. `projects/commerce/dags/blueprints.py`
+#       carries no occurrence of the word "airflow", so DagBag's safe mode skips
+#       the file and none of commerce's five blueprint DAGs — returns_daily
+#       among them — is ever in the bag. A dag_parses or dag_structure check
+#       naming returns_daily fails on the shipped tree and on any answer, which
+#       is why neither is here. The verifier grades the statement file itself,
+#       so a fix that guts the job still has to make the statement right; the
+#       missing DAG is a world fault and somebody else's ticket.
+#
+#   edit the shared models or the raw layer to agree with a wrong reading
+#       fails do_not_modify. `_sources.yml`, `stg_sales__order_lines` and
+#       `stg_sales__returns` all state the pair; they are the record the answer
+#       is read from.
+#
+# Cost: no DAG replays. The verifier runs the three statements over two order
+# days and one returns night against the shipped warehouse, in about two seconds.
+replay: []
+
+checks:
+
+# The close still renders. It needs no editing for this ticket, so this is the
+# guard against collateral damage. `returns_daily` cannot be asserted the same
+# way — see the note above on commerce's blueprint loader.
+- kind: dag_parses
+  dag_id: nightly_close
+
+# The ten graded decisions: the two the oracle makes about the world, the line
+# economics over two order days, the booking and the grain over the same two,
+# the promotion push-down over the same two, and the orphan count over a night
+# with orphans in it and a night without.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600

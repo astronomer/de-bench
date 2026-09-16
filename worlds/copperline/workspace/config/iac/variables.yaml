@@ -1,0 +1,35 @@
+# Airflow variables, by key. Applied by plat_config_sync.
+#
+# A variable is for something a person changes between deployments. Anything a
+# run needs to know about its own dates comes from the run, not from here.
+
+variables:
+  copperline_env: production
+
+  # The teams that may drop a workbook in landing/<team>/ for plat_workbook_inbox.
+  workbook_inbox_teams: finance,supply,commerce
+
+  # Where the GL export lands for Ironwood to collect.
+  gl_export_root: exports/gl
+
+  # The close file's export root. One file per fiscal month.
+  close_export_root: exports/close
+
+  # The partner share drop, by partner.
+  partner_share_root: exports/partner_share
+
+  # How many pages the fixture API is allowed to serve one poll before the
+  # loader gives up. It has never gone past forty.
+  api_page_limit: "1000"
+
+  # Which dbt target the scheduled builds use. `dev` is for a person.
+  dbt_target: prod
+
+  # The freshness check's warn and error hours, for the sources that do not
+  # override them in the dbt project.
+  freshness_warn_hours: "6"
+  freshness_error_hours: "24"
+
+  # The retention DAG's dry-run switch. Turned on twice, both times after an
+  # incident, and turned off again the same week.
+  retention_dry_run: "false"

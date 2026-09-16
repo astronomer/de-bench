@@ -1,0 +1,34 @@
+dag_id: sc_dc_capacity_daily
+schedule: "0 7 * * *"
+description: units held against forecast capacity, by distribution centre
+default_args:
+  owner: supply
+  retries: 2
+tags: [supply, mart, inventory]
+steps:
+  wait_for_position:
+    blueprint: sensor_wait
+    asset: marts.inventory_position
+    partition_col: ds
+    timeout: 7200
+    poke_interval: 300
+  held:
+    blueprint: rollup
+    depends_on: [wait_for_position]
+    source: marts.inventory_position
+    group_by: [location_id]
+    agg: sum
+    column: on_hand_units
+    as: held_units
+    target: marts.dc_capacity_daily
+  forecast:
+    blueprint: dbt_select
+    depends_on: [held]
+    select: dc_capacity_daily
+  export:
+    blueprint: partition_export
+    depends_on: [forecast]
+    source: marts.dc_capacity_daily
+    layer: marts
+    name: dc_capacity
+    order_by: [location_id]

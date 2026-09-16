@@ -1,0 +1,5 @@
+# kinds.py holds blueprint builders, not DAGs. The factory imports it when it
+# renders this folder's YAML; the scheduler must not import it a second time
+# under a name of its own, because registering a kind twice from two modules
+# is an error rather than a no-op.
+kinds.py

@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <info>
+    <name>set_constants</name>
+    <description>Site settings for the night: staging schema and watermark column.</description>
+    <extended_description>Runs first. The staging schema is fixed here; the watermark column
+comes from kettle.properties on the PDI host so that the same job file can be pointed at a
+copy of the warehouse without editing it.</extended_description>
+    <trans_version>1.4</trans_version>
+    <trans_type>Normal</trans_type>
+    <directory>/copperline/nightly/trn</directory>
+    <parameters/>
+    <feedback_shown>Y</feedback_shown>
+    <feedback_size>50000</feedback_size>
+    <using_thread_priorities>Y</using_thread_priorities>
+    <created_user>amireles</created_user>
+    <created_date>2019/03/11 22:44:02.771</created_date>
+    <modified_user>amireles</modified_user>
+    <modified_date>2020/09/28 09:12:31.006</modified_date>
+  </info>
+  <order>
+    <hop><from>one row</from><to>site constants</to><enabled>Y</enabled></hop>
+    <hop><from>site constants</from><to>site properties</to><enabled>Y</enabled></hop>
+    <hop><from>site properties</from><to>export to job</to><enabled>Y</enabled></hop>
+  </order>
+  <step>
+    <name>one row</name>
+    <type>RowGenerator</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <fields/>
+    <limit>1</limit>
+    <never_ending>N</never_ending>
+    <interval_in_ms>5000</interval_in_ms>
+    <row_time_field>now</row_time_field>
+    <last_time_field>FiveSecondsAgo</last_time_field>
+    <cluster_schema/>
+    <GUI><xloc>96</xloc><yloc>80</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>site constants</name>
+    <type>Constant</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <fields>
+      <field>
+        <name>staging_schema</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <nullif>stg_pdi</nullif>
+        <length>-1</length>
+        <precision>-1</precision>
+        <set_empty_string>N</set_empty_string>
+      </field>
+    </fields>
+    <cluster_schema/>
+    <GUI><xloc>240</xloc><yloc>80</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>site properties</name>
+    <type>GetVariable</type>
+    <description>kettle.properties on the PDI host</description>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <fields>
+      <field>
+        <name>watermark_column</name>
+        <variable>${COPPERLINE_WATERMARK_COL}</variable>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+    </fields>
+    <cluster_schema/>
+    <GUI><xloc>400</xloc><yloc>80</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>export to job</name>
+    <type>SetVariable</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <fields>
+      <field>
+        <variable_name>STAGING_SCHEMA</variable_name>
+        <field_name>staging_schema</field_name>
+        <variable_type>PARENT_JOB</variable_type>
+        <default_value/>
+      </field>
+      <field>
+        <variable_name>WATERMARK_COLUMN</variable_name>
+        <field_name>watermark_column</field_name>
+        <variable_type>PARENT_JOB</variable_type>
+        <default_value/>
+      </field>
+    </fields>
+    <usevar>N</usevar>
+    <cluster_schema/>
+    <GUI><xloc>560</xloc><yloc>80</yloc><draw>Y</draw></GUI>
+  </step>
+  <step_error_handling/>
+  <slave-step-copy-partition-distribution/>
+  <slave_transformation>N</slave_transformation>
+</transformation>

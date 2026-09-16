@@ -1,0 +1,154 @@
+# PLAT-468 grades two things: the two documents, and the write-up.
+#
+# The documents are graded by a pair of verifiers that recompute the truth from
+# the tree the trial leaves behind, by the rule the ticket states. No verdict is
+# authored. What is authored is which reader names to put the rule to, and each
+# of those is cross-checked against the tree before anything is graded, so a
+# world change that moves a read fails the verifier loudly instead of grading a
+# stale answer. `test_lineage.py`'s docstring says the whole of it.
+#
+# The write-up is graded by six patterns over `RESPONSE.md`. They grade six
+# separate findings, so an agent that removes the two obvious rows and stops
+# passes one of the six. Patterns are matched case-insensitively, and they are
+# written loose on purpose: what each one pins is a reader name beside a verdict
+# and the file the verdict was read out of, never a phrasing or a table shape.
+#
+# Nothing runs a DAG, so nothing needs replaying first.
+#
+# WHAT IS DELIBERATELY NOT GRADED, AND WHY
+#
+# Rows another team's open ticket disputes. Trials are independent and the
+# shipped tree is what this task grades, but a row two tickets disagree about is
+# not a fact:
+#   - every C-10 row, on `marts.comp_sales_daily`, `marts.gmv_daily` and
+#     `marts.daily_revenue`. PLAT-455 reconciles `config/alerts.yml` against its
+#     schema and moves four of them.
+#   - the C-11 row's `How` and `Path` on `marts.sell_through_daily`. SC-1512
+#     moves that coupling off a filename and onto the table. Its READER is not
+#     in dispute — the vendor share reads the mart under both tickets — so the
+#     row is graded on surviving and on nothing else.
+#   - the C-1 row on `marts.revenue_recognized_monthly`. FIN-457 removes it.
+# None of the three audited marts carries a C-10 row, and `revenue_recognized_
+# monthly` is not audited here, so only the C-11 narrowing bites.
+#
+# Readers a defensible audit could add and this task neither asks for nor
+# convicts: `dq_profile` and `plat_asset_republish`, which name all three marts
+# in platform's own profiling and republishing lists; and `nightly_close` and
+# `order_economics_daily`, which write `marts.order_economics` and select from
+# it again to check their own grain. Producer or reader is a real argument and
+# the ticket does not settle it, so extra rows are not marked wrong.
+#
+# `gro_pricing_mart_daily` is graded as a reader that stays. It never selects
+# from `marts.sell_through_daily`; it schedules on the asset, and
+# `projects/growth/lib/assets.py:70` says in as many words that the pricing mart
+# reads it. Either reading of that row keeps it, so keeping it is what is graded
+# and the `How` cell is not.
+#
+# WRONG-ANSWER BATTERY
+#
+#   removes every row it cannot grep          takes `fin_ledger_tie` with it,
+#                                             whose table name is three keys in
+#                                             `config/recon.yml`; fails
+#                                             test_every_row_the_code_supports_
+#                                             survived and the RESPONSE check
+#                                             that pins the config file
+#   greps `projects/*/dags/` only             finds none of the three missing
+#                                             readers, all of which read the
+#                                             mart from a lib module; fails
+#                                             test_the_readers_the_sweep_finds_
+#                                             are_listed
+#   works the document and not the registry   fails test_every_consumer_reads_
+#                                             what_its_publisher_reads
+#   trusts the `How` column                   every row that is wrong claims
+#                                             `ref`, and `dbt ls` cannot see any
+#                                             of them, so the column convicts
+#                                             nothing on its own
+#   deletes the dashboard and export rows      the ticket puts them out of scope;
+#   because the files are not in the tree      fails test_the_rows_the_ticket_
+#                                              puts_out_of_scope_were_left_alone
+#   adds a row with no path, or a path that   fails test_every_row_added_names_
+#   names a file nobody can open              a_file_that_exists
+#   writes the audit and leaves the documents fails both verifiers; the ticket
+#   alone                                     asks for the correction and the
+#                                             record
+replay: []
+
+checks:
+
+# The lineage document. Four rows out, three in, six kept, the out-of-scope
+# rows untouched, and a real path on every row added.
+- kind: pytest_verifier
+  file: test_lineage.py
+  timeout: 300
+
+# The registry. §REG-2 made true for the three marts: the two customer
+# consumers whose publisher reads `marts.order_economics` through a module in
+# their own project now say so.
+- kind: pytest_verifier
+  file: test_registry.py
+  timeout: 300
+
+# The two supply rows. `sc_shrink_weekly` values a counted delta off
+# `raw.wms_movements`, `sc_supplier_scorecard_weekly` scores off
+# `marts.int_po_receipt_matched`, and neither has ever named the sell-through
+# mart. These are the two a grep finds, so this is the check a partial answer
+# passes.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(sc_shrink_weekly[^\n]{0,300}(remove|drop|delete|not a reader|does not read|never read|no read|stale|wrong|false|no longer)|(remove|drop|delete|not a reader|does not read|never read|no read|stale|wrong|false|no longer)[^\n]{0,300}sc_shrink_weekly)'
+  - '(sc_supplier_scorecard_weekly[^\n]{0,300}(remove|drop|delete|not a reader|does not read|never read|no read|stale|wrong|false|no longer)|(remove|drop|delete|not a reader|does not read|never read|no read|stale|wrong|false|no longer)[^\n]{0,300}sc_supplier_scorecard_weekly)'
+
+# `fin_margin_daily`, and the reason. The DAG builds `marts.category_margin`
+# from the two shared `int` models its own docstring names, and the dbt model of
+# the same name is the row that is true. An agent that removes it without
+# saying what the job actually reads has guessed; naming either source is the
+# evidence that it read the file.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(fin_margin_daily[^\n]{0,300}(remove|drop|delete|not a reader|does not read|never read|no read|stale|wrong|false|no longer)|(remove|drop|delete|not a reader|does not read|never read|no read|stale|wrong|false|no longer)[^\n]{0,300}fin_margin_daily)'
+  - '(int_net_sales_lines|int_order_lines_costed)'
+
+# The churn job. It builds its five inputs into `ops.churn_features` and reads
+# them back; the mart it does read is `marts.customer_360`, and it is listed
+# there already. Naming the table it really reads is what separates the finding
+# from a lucky deletion.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(cus_churn_scores_weekly[^\n]{0,300}(remove|drop|delete|not a reader|does not read|never read|no read|stale|wrong|false|no longer)|(remove|drop|delete|not a reader|does not read|never read|no read|stale|wrong|false|no longer)[^\n]{0,300}cus_churn_scores_weekly)'
+  - '(ops\.churn_features|churn_features)'
+
+# The row that survives a grep it cannot pass. `fin_ledger_tie` never spells
+# `marts.order_economics` out: `config/recon.yml` carries schema `marts`,
+# subject `order` and grain `economics`, and the DAG assembles the three. The
+# reply has to keep the row AND name the config file, because keeping it by
+# accident is not an audit. This is the check that convicts a blanket purge.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'fin_ledger_tie'
+  - '(config/recon\.yml|recon\.yml)'
+  - '(fin_ledger_tie[^\n]{0,300}(keep|kept|stays|confirmed|correct|true|verified)|(keep|kept|stays|confirmed|correct|true|verified)[^\n]{0,300}fin_ledger_tie)'
+
+# The three readers the list has never had, each named beside the module the
+# read lives in. All three are cross-project: two customer jobs profile order
+# history and behaviour windows off the mart, and growth's experiment readout
+# takes `net_sales_cents` from it. A sweep of `projects/*/dags/` finds none of
+# them, so this is the check that separates a reverse sweep from a forward one.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'cus_customer_360_daily[^\n]{0,300}profile\.py|profile\.py[^\n]{0,300}cus_customer_360_daily'
+  - 'features\.py'
+  - 'gro_experiment_readout_daily[^\n]{0,300}experiments\.py|experiments\.py[^\n]{0,300}gro_experiment_readout_daily'
+
+# The registry half, written down. §REG-2 is a claim about the `Reads` column
+# and two consumers break it. The reply names both and says what they gained.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\bC-8\b'
+  - '\bC-9\b'
+  - '(C-8|C-9)[^\n]{0,300}(marts\.)?order_economics'

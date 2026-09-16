@@ -1,0 +1,60 @@
+# The nightly test run. One task per team's selection, so a failure names the
+# team whose models broke rather than "the suite".
+#
+# The shared selection goes first: staging and the conformed dims are what
+# every team's tests join against, so a team failure behind a shared failure is
+# noise. `docs/lineage.md` and `contracts/` say what the mart tests are for.
+#
+# Twelve of these fail on the current tree. `docs/memos/2026-04-quality-contract-revision.md`
+# is the revision they are measured against.
+
+dag_id: plat_dbt_test_nightly
+schedule: "30 5 * * *"
+description: the test selection each team tags, one task per team
+tags: [platform, dbt, quality]
+
+default_args:
+  owner: platform
+  retries: 1
+
+steps:
+  test_shared:
+    blueprint: dbt_select
+    command: test
+    select: "tag:shared"
+    target: prod
+
+  test_finance:
+    blueprint: dbt_select
+    depends_on: [test_shared]
+    command: test
+    select: "tag:finance"
+    target: prod
+
+  test_commerce:
+    blueprint: dbt_select
+    depends_on: [test_shared]
+    command: test
+    select: "tag:commerce"
+    target: prod
+
+  test_supply:
+    blueprint: dbt_select
+    depends_on: [test_shared]
+    command: test
+    select: "tag:supply"
+    target: prod
+
+  test_growth:
+    blueprint: dbt_select
+    depends_on: [test_shared]
+    command: test
+    select: "tag:growth"
+    target: prod
+
+  test_customer:
+    blueprint: dbt_select
+    depends_on: [test_shared]
+    command: test
+    select: "tag:customer"
+    target: prod

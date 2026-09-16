@@ -1,0 +1,175 @@
+# Both processors fed settlements for the same payments through the migration
+# quarter, on purpose. `int_payment_matched` calls an order both books claim
+# `is_shadow_quarter` — with no date in the flag at all — and adds the two books'
+# money together underneath it. So the flag is true of the whole quarter by
+# design, the tie selects all of it, and the variance it reports on a dual-fed
+# order is the order's own total: the same payment, added to itself. The two
+# feeds agree to the cent on the payments they share, so nothing in that variance
+# is a disagreement about money.
+#
+# `raw.pay_processor_windows` is the record and the tree names it twice — in the
+# model's own header and in `marts.cash_recon_daily`, which says outright that it
+# reports the overlap and cannot resolve it. It holds Halcyon through 2025-08-31
+# and Meridian from 2025-09-01, so the authority changes hands in the MIDDLE of
+# the overlap and not at the end of it, which is where the tie's own header
+# assumes it. `docs/runbooks/processor-migration.md` and `docs/billing-integration.md`
+# B-8 both say a row outside its processor's window is shadow traffic and is not
+# counted — a row, on its own date, not an order on the order's date. The runbook
+# spends its last paragraph on the case that separates the two: a payment
+# captured in August and settled in September is claimed by both books and both
+# are right. The built world holds 45 orders that draw an authoritative half from
+# each book, and their two halves add to the order exactly.
+#
+# The table is not a dbt source and has no staging view, which is why the staging
+# layer is left open: landing it is part of the job.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier computes every expected
+# result from `raw.orders`, `raw.payment_intents`, the two settlement feeds and
+# the windows table in the same session — including the two boundary dates, which
+# it reads rather than names. The row counts in the world's own notes come from a
+# smaller build of it and are not used, on purpose.
+#
+# WHY DBT RUNS. `int_payment_matched` is a view and the world ships the landed
+# half of the warehouse only, so the relation does not exist until dbt has made
+# it. The prepare step builds it and the views above it. `marts.fct_payments` is
+# built inside the verifier, because it is the reader that proves no published
+# column was dropped. No DAG replays.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   leave the two books added together        verifier: settled_net_cents, order
+#     and only reword the tie                 by order — wrong on every order the
+#                                             overlap touches
+#   decide on the order's date instead of     verifier: settled_net_cents — the
+#     the settlement row's date               orders that straddle the boundary
+#                                             come out wrong
+#   take the boundary as the end of the       verifier: settled_net_cents — the
+#     shadow quarter (2025-09-30) rather      September orders come out wrong,
+#     than the windows table's                and the mutation test moves the
+#                                             table under a typed-in date
+#   type the two dates into the model         verifier: the boundary is moved in
+#                                             raw.pay_processor_windows and the
+#                                             model has to follow it
+#   drop the legacy feed entirely             verifier: settled_net_cents on
+#     ("Halcyon is dead")                     every order Halcyon settled
+#   drop every dual-fed order's money         verifier: settled_net_cents, and
+#                                             the money that was authoritative
+#   filter the overlap out in staging         verifier: the staging views are
+#                                             1:1 with the landed feeds
+#   resolve the overlap and lose the flag     verifier: the flag still marks the
+#                                             dual-fed orders, and fct_payments
+#                                             publishes it
+#   restate grand_total_cents to the          verifier: the order total is not
+#     settled amount so the tie ties          restated
+#   a column a reader selects dropped         verifier: marts.fct_payments still
+#                                             builds and still has rows
+#   widen the tie until it passes             the tie is graded by what it does,
+#     (an equality with a huge allowance)     not by its number: the mutation
+#                                             makes one order settle twice over
+#   drop the tie to a warning                 file_lacks on the tests directory,
+#                                             file_contains on dbt_project.yml
+#   delete the tie                            file_contains on its path, and the
+#                                             verifier selects it by name
+#   empty the tie to `where false`            file_lacks, and the mutation test
+#   a tie that only asserts the flag          the mutation test: the duplicate is
+#     (no shadow money outside the window)    inside the window and moves no
+#                                             shadow money
+#   "the feeds are duplicated, re-extract"    verifier: nothing is fixed, and the
+#                                             oracle's own tests say both feeds
+#                                             are meant to carry the quarter
+#   a note and no code change                 every verifier test
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES. The ticket says `settled_net_cents` keeps
+# the arithmetic it has and that both books stay visible; it does not say whether
+# `meridian_captured_cents` and `halcyon_settled_cents` publish what each book
+# says whole or only what each book was authoritative for. Both readings pass:
+# nothing here grades those two columns, and `marts.fct_payments` builds either
+# way. Which columns the tie compares is not graded either — only that it is
+# green tonight and red when a payment settles twice.
+
+replay: []
+
+checks:
+
+# The substance: the model against the two feeds and the windows table, the
+# windows table moved under the model, and the tie against a payment settled
+# twice. See verifier/test_outputs.py.
+- kind: pytest_verifier
+  file: test_outputs.py
+  prepare:
+  - cd dbt/copperline_analytics && /opt/dbt-venv/bin/dbt run --select +int_payment_matched --profiles-dir .
+  timeout: 1200
+
+# The tie is still there and still reads the model. What it asserts is graded by
+# running it, not by matching it, so nothing here names a column or a number.
+- kind: file_contains
+  path: dbt/copperline_analytics/tests/commerce/tie_settlement_processor_overlap.sql
+  matches:
+  - "ref\\(\\s*['\"]int_payment_matched['\"]\\s*\\)"
+
+# The cheap ways to make a red test green without answering it. The glob is the
+# whole commerce tie directory, so the same move made in a sibling tie is caught
+# too. Only the warning value and the two thresholds are named, so a test that
+# says `severity='error'` out loud is not convicted for being explicit.
+- kind: file_lacks
+  path: dbt/copperline_analytics/tests/commerce/*.sql
+  patterns:
+  - "severity\\s*[=:]\\s*['\"]?warn"
+  - 'warn_if'
+  - 'error_if'
+  - '\bwhere\s+false\b'
+  - '\b1\s*=\s*0\b'
+  - '\blimit\s+0\b'
+
+# The suite-wide severity. One word under `tests:` in the project file turns all
+# 625 tests into warnings and the nightly stops meaning anything.
+- kind: file_contains
+  path: dbt/copperline_analytics/dbt_project.yml
+  matches:
+  - '\+severity:\s*error'
+
+# The four lines for the DQ-77 thread. Patterns are matched case-insensitively
+# with re.search and are written loose on purpose: each pins a fact or a name,
+# never a phrasing, and a table row satisfies them as readily as a sentence.
+
+# Lines one and two, which are one finding: the flag says "both books hold this"
+# and says nothing about a date, so it is true of the whole quarter; and the
+# money underneath it is the same payment added to itself. The first pattern
+# wants the flag's real reading named, the second the arithmetic. A reply that
+# says "the shadow quarter is expected" and stops has not made the argument.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(is_shadow_quarter|both books|both processors|two books|seen by both|either book)'
+  - '(count(ed|s|ing)?[^\n]{0,20}twice|double[- ]?count|twice over|added (them )?together|adds [^\n]{0,20}(both|the two|together)|sum(med|s)?[^\n]{0,30}(both|the two)|same payment[^\n]{0,40}(again|twice|itself))'
+
+# That the test flags the whole quarter and not a tail of it. The ticket says the
+# test cannot separate the two, so a reply that reaches the cause has this; what
+# it convicts is a reply that reports a subset and calls the rest fine.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(every|all|each|the whole|the entire)[^\n]{0,60}(quarter|overlap|order|payment)'
+
+# Line three: the record, and what it says. The two dates are the sentence the
+# whole ticket turns on — the boundary is in the middle of the overlap and not at
+# the end of it — and the second pattern wants the other half of the reading: it
+# applies to a settlement row on the row's own date. Neither is in the ticket.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'pay_processor_windows'
+  - '(2025-09-01|2025-08-31|1 September 2025|31 August 2025)'
+  - '(row''s own|its own date|each (row|event|settlement|transaction)|per (row|event|settlement)|the settlement date|date on the row|dates? the rows? carr)'
+
+# Line four: how far the same reading reaches. Two answers are wanted and they
+# sit in different teams' trees: the commerce marts that publish the netted money
+# off this model, and the ledger, where `int_gl_postings_unified` posts both card
+# books whole and `marts.cash_recon_daily` says in its own header that it can
+# report the overlap and not resolve it. Neither is named in the ticket, and an
+# agent that fixed the model without asking who reads it cannot answer this.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(fct_payments|recon_exceptions|fct_order)'
+  - '(cash_recon_daily|gl_postings)'

@@ -1,0 +1,88 @@
+# The copperline world's whole history. Every module of tools/gen_copperline
+# reads its dates and rates from here; nothing reads a wall clock. Dates and
+# rates are the ones docs/copperline-spec/01-timeline.md fixes —
+# chapter 01 owns every date in the world.
+
+world: copperline
+seed: 20260615
+today: 2026-06-15
+range: {start: 2024-02-04, end: 2026-06-14}
+
+fiscal:
+  pattern: 4-5-4
+  year_end_rule: saturday-nearest-jan-31
+  emit_years: [FY2022, FY2023, FY2024, FY2025, FY2026]
+
+markets:
+  live: [US, CA, GB, IE, DE]
+  second_wave: [BR, MX, PL, ID]   # launched FY2026 Q1, in no mart yet
+
+eras:
+  E1_pos_local_stamp:
+    from: 2013-08-05
+    to: 2025-11-02
+    note: POS headers stamp store-local time (23:05 batch close), no UTC column
+  E2_customer_rekey:
+    at: 2024-11-04
+    tail_until: 2024-11-17
+    note: trade accounts re-key CUST#### -> C-######; crosswalk ships with 60
+      orphans; 45 old-format rows land after the cutover
+  E3_northwave_acquisition:
+    at: 2025-02-03
+    book_lands: 2025-03-17
+    nwv_frozen: 2025-09-30
+    note: Northwave Supply acquired; its account book lands as raw.nwv_accounts
+      and the nwv schema freezes without ever merging
+  E4_halcyon_non_usd:
+    at: 2025-04-07
+    note: non-USD volume begins settling through Halcyon (~30% of its volume
+      after this date), in a feed format that never learned about currency
+  E5_processor_overlap:
+    from: 2025-07-01
+    to: 2025-09-30
+    authoritative_until: 2025-08-31   # Halcyon through here, Meridian after
+    note: both processors feed settlements for the same payments during the
+      migration quarter
+  E6_utc_cutover:
+    at: 2025-11-03
+    note: POS event times become UTC; E1 ends the day before
+  E7_orchestrator_migration:
+    at: 2026-01-05
+    control_break: 2026-04-06
+    note: the current scheduler deployment begins; run history exists only
+      from this date
+  E8_valuation_change:
+    at: 2026-02-01
+    note: inventory valuation method changes at department grain
+
+volumes:
+  orders_per_day_base: 3000
+  # Days every store in every market is shut. The store channel sells zero;
+  # web, marketplace and trade carry on. The market calendar marks the same
+  # three days feed_expected=false in all nine markets, and POS ships no
+  # batch file for them — one fact, three surfaces.
+  all_market_closures: [2024-12-25, 2025-12-25, 2026-05-25]
+  # The clickstream scale knob, and the only volume that has one. At 0.25 the
+  # feed runs at about 3,100 events a day, which is the level the feed-decay
+  # postmortem and config/alerts.yml are both written against. Raise it to
+  # 1.0 to make the wall-clock cap bind; nothing else in the world moves.
+  clickstream_scale: 0.25
+  # Days of hourly parquet the landing tree holds. RET-2 keeps this feed 400
+  # days live, which is 48,000 files; trial setup cannot pay for that, and
+  # raw.web_events holds the whole history either way.
+  clickstream_landing_days: 7
+  weekday_shape: [0.86, 0.95, 0.98, 1.02, 1.24, 1.48, 1.11]   # Sun..Sat
+  annual_growth_pct: 9
+  spikes:
+    - {date: 2024-11-29, factor: 30, name: black_friday, channels: [store, web, marketplace]}
+    - {date: 2024-12-02, factor: 18, name: cyber_monday, channels: [web, marketplace]}
+    - {date: 2025-11-28, factor: 30, name: black_friday, channels: [store, web, marketplace]}
+    - {date: 2025-12-01, factor: 18, name: cyber_monday, channels: [web, marketplace]}
+
+# Per-mille load-lag tails. Nothing arrives later than day 5, and something
+# always arrives on the last declared day — the invariant pass measures both.
+late_tail:
+  default: {d0: 0.924, d1: 0.041, d2: 0.018, d3: 0.009, d4: 0.005, d5: 0.003}
+  marketplace: {d0: 0.71, d1: 0.14, d2: 0.07, d3: 0.04, d4: 0.03, d5: 0.01}
+  store_card: {d0: 1.0}   # the settlement leg is never late; the POS batch
+                          # FILE can arrive up to 3 days late, a file-level lag

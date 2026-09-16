@@ -1,0 +1,51 @@
+# Organic rank positions for the tracked keyword set, from the rank vendor's
+# listing API.
+#
+# The API pages fifty rows at a time and never says how many pages there are:
+# `total` is null on every response and the last page is the one with no
+# `next_page_token`. `JsonApiToWarehouseOperator` follows the token to the
+# end, which is why this DAG can be four steps and no loop. A first-page
+# answer would land 50 of about 4,000 rows and look exactly like a complete
+# one.
+#
+# The vendor measures overnight and publishes the previous day, so this run
+# owns `{{ macros.ds_add(ds, -1) }}`.
+dag_id: gro_seo_rank_intake
+schedule: "0 4 * * *"
+description: organic rank positions for the previous day
+start_date: 2026-01-05
+tags: [growth, seo, intake, blueprint]
+default_args:
+  owner: growth
+  retries: 2
+
+steps:
+  land_ranks:
+    blueprint: api_intake
+    endpoint: seo/rankings
+    params:
+      as_of: "{{ macros.ds_add(ds, -1) }}"
+    table: raw.seo_rankings
+    mode: replace
+    partition_col: observed_on
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+
+  stage_ranks:
+    blueprint: dbt_select
+    depends_on: [land_ranks]
+    select: stg_ecommerce__seo_rankings
+
+  search_effectiveness:
+    blueprint: dbt_select
+    depends_on: [stage_ranks]
+    select: agg_search_effectiveness
+    vars:
+      run_date: "{{ macros.ds_add(ds, -1) }}"
+
+  publish_ranks:
+    blueprint: partition_export
+    depends_on: [search_effectiveness]
+    source: marts.agg_search_effectiveness
+    name: search_effectiveness
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [keyword]

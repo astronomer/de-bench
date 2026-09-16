@@ -1,0 +1,360 @@
+<?xml version="1.0"?>
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:refId="Package"
+  DTS:CreationDate="8/14/2016 4:22:01 PM"
+  DTS:CreationName="Microsoft.Package"
+  DTS:CreatorComputerName="CPLBI01"
+  DTS:CreatorName="CPLCORP\dhaas"
+  DTS:Description="Nightly supplier master extract from ERP to the interface share."
+  DTS:DTSID="{9F1C2D33-4A70-4B0E-9D3B-6C0B2E51A118}"
+  DTS:ExecutableType="Microsoft.Package"
+  DTS:LastModifiedProductVersion="13.0.1601.5"
+  DTS:LocaleID="1033"
+  DTS:ObjectName="SupplierMaster"
+  DTS:PackageType="5"
+  DTS:ProtectionLevel="1"
+  DTS:VersionBuild="41"
+  DTS:VersionGUID="{3B0E7A22-C4D9-4E51-A0F4-77B2C63D9E05}">
+  <DTS:Property DTS:Name="PackageFormatVersion">8</DTS:Property>
+  <DTS:Property DTS:Name="ConfigurationType">1</DTS:Property>
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[ERP_PROD]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{5C7A1F04-2B88-4C3D-9E11-4A0D8F6B22C7}"
+      DTS:ObjectName="ERP_PROD">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=CPLERP01;Initial Catalog=ERP;Provider=SQLNCLI11.1;Integrated Security=SSPI;Auto Translate=False;"/>
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[BI_STAGE]"
+      DTS:CreationName="OLEDB"
+      DTS:DTSID="{7E2B9C10-6F41-4A6B-8C05-1D93B4E7A662}"
+      DTS:ObjectName="BI_STAGE">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ConnectionString="Data Source=CPLBI01;Initial Catalog=BIStage;Provider=SQLNCLI11.1;Integrated Security=SSPI;"/>
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+    <DTS:ConnectionManager
+      DTS:refId="Package.ConnectionManagers[SupplierDrop]"
+      DTS:CreationName="FLATFILE"
+      DTS:DTSID="{A1D4E7B9-33C2-4F80-B5AE-902C7D14F338}"
+      DTS:ObjectName="SupplierDrop"
+      DTS:Description="pipe delimited, no quotes, 1252. the Pentaho side reads this.">
+      <DTS:ObjectData>
+        <DTS:ConnectionManager
+          DTS:ColumnDelimiter="|"
+          DTS:CodePage="1252"
+          DTS:Format="Delimited"
+          DTS:HeaderRowDelimiter="_x000D__x000A_"
+          DTS:RowDelimiter="_x000D__x000A_"
+          DTS:ColumnNamesInFirstDataRow="True"
+          DTS:ConnectionString="\\cplfs01\interfaces\out\supplier_master.csv"/>
+      </DTS:ObjectData>
+    </DTS:ConnectionManager>
+  </DTS:ConnectionManagers>
+  <DTS:Variables>
+    <DTS:Variable
+      DTS:refId="Package.Variables[User::DropFolder]"
+      DTS:CreationName=""
+      DTS:DTSID="{2C55A8E1-9B3F-42D7-8A16-C40B9E1D7745}"
+      DTS:Namespace="User"
+      DTS:ObjectName="DropFolder">
+      <DTS:VariableValue DTS:DataType="8">\\cplfs01\interfaces\out</DTS:VariableValue>
+    </DTS:Variable>
+    <DTS:Variable
+      DTS:refId="Package.Variables[User::BusinessDate]"
+      DTS:CreationName=""
+      DTS:DTSID="{6D0F3B72-1E48-4C9A-B233-58E7A0C1F914}"
+      DTS:Namespace="User"
+      DTS:ObjectName="BusinessDate"
+      DTS:EvaluateAsExpression="True"
+      DTS:Expression="(DT_WSTR,4)YEAR(DATEADD(&quot;dd&quot;,-1,GETDATE())) + &quot;-&quot; + RIGHT(&quot;0&quot; + (DT_WSTR,2)MONTH(DATEADD(&quot;dd&quot;,-1,GETDATE())),2) + &quot;-&quot; + RIGHT(&quot;0&quot; + (DT_WSTR,2)DAY(DATEADD(&quot;dd&quot;,-1,GETDATE())),2)">
+      <DTS:VariableValue DTS:DataType="8"/>
+    </DTS:Variable>
+    <DTS:Variable
+      DTS:refId="Package.Variables[User::DropFileName]"
+      DTS:CreationName=""
+      DTS:DTSID="{B7241C6E-05AA-4E39-9D80-3F16C2B4A5D1}"
+      DTS:Namespace="User"
+      DTS:ObjectName="DropFileName"
+      DTS:EvaluateAsExpression="True"
+      DTS:Expression="@[User::DropFolder] + &quot;\\supplier_master_&quot; + @[User::BusinessDate] + &quot;.csv&quot;">
+      <DTS:VariableValue DTS:DataType="8"/>
+    </DTS:Variable>
+    <DTS:Variable
+      DTS:refId="Package.Variables[User::RowsWritten]"
+      DTS:CreationName=""
+      DTS:DTSID="{4F98D0A3-7C21-4B55-93E6-8A0D5C7B1E20}"
+      DTS:Namespace="User"
+      DTS:ObjectName="RowsWritten">
+      <DTS:VariableValue DTS:DataType="3">0</DTS:VariableValue>
+    </DTS:Variable>
+  </DTS:Variables>
+  <DTS:Executables>
+    <DTS:Executable
+      DTS:refId="Package\SQL Truncate Staging"
+      DTS:CreationName="Microsoft.ExecuteSQLTask"
+      DTS:DTSID="{1A6B3C90-7D24-4E11-B0F5-2C8A9E403D66}"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="SQL Truncate Staging">
+      <DTS:ObjectData>
+        <SQLTask:SqlTaskData xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask"
+          SQLTask:Connection="{7E2B9C10-6F41-4A6B-8C05-1D93B4E7A662}"
+          SQLTask:SqlStatementSource="TRUNCATE TABLE dbo.SupplierMasterStage;"/>
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\FSYS Archive Previous Drop"
+      DTS:CreationName="Microsoft.FileSystemTask"
+      DTS:Description="turned off 2019-11-04 when the archive share filled up. left in place."
+      DTS:Disabled="True"
+      DTS:DTSID="{8C50E7F2-B913-4A6D-8E27-6D1F0B94C3A8}"
+      DTS:ExecutableType="Microsoft.FileSystemTask"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="FSYS Archive Previous Drop">
+      <DTS:ObjectData>
+        <FileSystemData
+          TaskOperationType="MoveFile"
+          TaskSourceType="Variable"
+          TaskSourceVariable="User::DropFileName"
+          TaskDestinationType="Variable"
+          TaskDestinationVariable="User::ArchiveFolder"
+          OverwriteDestFile="True"/>
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\DFT Extract Suppliers"
+      DTS:CreationName="Microsoft.Pipeline"
+      DTS:DTSID="{D3A72E15-9F60-4C83-A7B1-05E2C48D9036}"
+      DTS:ExecutableType="Microsoft.Pipeline"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="DFT Extract Suppliers">
+      <DTS:ObjectData>
+        <pipeline>
+          <components>
+            <component
+              refId="Package\DFT Extract Suppliers\OLE_SRC Suppliers"
+              componentClassID="Microsoft.OLEDBSource"
+              name="OLE_SRC Suppliers">
+              <properties>
+                <property name="AccessMode" dataType="System.Int32">2</property>
+                <property name="SqlCommand" dataType="System.String">SELECT  v.VendorNo          AS supplier_id,
+        LTRIM(RTRIM(v.VendorName)) AS supplier_name,
+        v.StatusCode        AS vendor_status,
+        t.TermsCode         AS payment_terms,
+        v.LeadTimeDays      AS lead_time_days,
+        v.CountryISO2       AS country,
+        v.LastMaintDate     AS updated_on
+FROM    dbo.Vendor v
+        LEFT JOIN dbo.VendorTerms t ON t.VendorNo = v.VendorNo
+WHERE   v.RecordStatus &lt;&gt; 'X'
+ORDER BY v.VendorNo;</property>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\DFT Extract Suppliers\OLE_SRC Suppliers.Connections[OleDbConnection]"
+                  connectionManagerID="{5C7A1F04-2B88-4C3D-9E11-4A0D8F6B22C7}"
+                  connectionManagerRefId="Package.ConnectionManagers[ERP_PROD]"
+                  name="OleDbConnection"/>
+              </connections>
+            </component>
+            <component
+              refId="Package\DFT Extract Suppliers\DER Clean Fields"
+              componentClassID="Microsoft.DerivedColumn"
+              name="DER Clean Fields">
+              <properties>
+                <property name="Note" dataType="System.String">status codes come out of the ERP padded. the Pentaho side trims again but do not rely on that.</property>
+              </properties>
+              <outputs>
+                <output refId="Package\DFT Extract Suppliers\DER Clean Fields.Outputs[Derived Column Output]">
+                  <outputColumns>
+                    <outputColumn
+                      refId="Package\DFT Extract Suppliers\DER Clean Fields.Outputs[Derived Column Output].Columns[vendor_status]"
+                      name="vendor_status"
+                      dataType="wstr"
+                      length="8">
+                      <properties>
+                        <property name="Expression" dataType="System.String">UPPER(TRIM(vendor_status))</property>
+                      </properties>
+                    </outputColumn>
+                    <outputColumn
+                      refId="Package\DFT Extract Suppliers\DER Clean Fields.Outputs[Derived Column Output].Columns[country]"
+                      name="country"
+                      dataType="wstr"
+                      length="2">
+                      <properties>
+                        <property name="Expression" dataType="System.String">ISNULL(country) ? "US" : UPPER(TRIM(country))</property>
+                      </properties>
+                    </outputColumn>
+                  </outputColumns>
+                </output>
+              </outputs>
+            </component>
+            <component
+              refId="Package\DFT Extract Suppliers\RC Count Rows"
+              componentClassID="Microsoft.RowCount"
+              name="RC Count Rows">
+              <properties>
+                <property name="VariableName" dataType="System.String">User::RowsWritten</property>
+              </properties>
+            </component>
+            <component
+              refId="Package\DFT Extract Suppliers\FF_DST SupplierDrop"
+              componentClassID="Microsoft.FlatFileDestination"
+              name="FF_DST SupplierDrop">
+              <properties>
+                <property name="Overwrite" dataType="System.Boolean">true</property>
+                <property name="Header" dataType="System.String"/>
+              </properties>
+              <connections>
+                <connection
+                  refId="Package\DFT Extract Suppliers\FF_DST SupplierDrop.Connections[FlatFileConnection]"
+                  connectionManagerID="{A1D4E7B9-33C2-4F80-B5AE-902C7D14F338}"
+                  connectionManagerRefId="Package.ConnectionManagers[SupplierDrop]"
+                  name="FlatFileConnection"/>
+              </connections>
+            </component>
+          </components>
+          <paths>
+            <path
+              refId="Package\DFT Extract Suppliers.Paths[src to der]"
+              name="src to der"
+              startId="Package\DFT Extract Suppliers\OLE_SRC Suppliers.Outputs[OLE DB Source Output]"
+              endId="Package\DFT Extract Suppliers\DER Clean Fields.Inputs[Derived Column Input]"/>
+            <path
+              refId="Package\DFT Extract Suppliers.Paths[der to count]"
+              name="der to count"
+              startId="Package\DFT Extract Suppliers\DER Clean Fields.Outputs[Derived Column Output]"
+              endId="Package\DFT Extract Suppliers\RC Count Rows.Inputs[Row Count Input]"/>
+            <path
+              refId="Package\DFT Extract Suppliers.Paths[count to file]"
+              name="count to file"
+              startId="Package\DFT Extract Suppliers\RC Count Rows.Outputs[Row Count Output]"
+              endId="Package\DFT Extract Suppliers\FF_DST SupplierDrop.Inputs[Flat File Destination Input]"/>
+          </paths>
+        </pipeline>
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\SQL Log Row Count"
+      DTS:CreationName="Microsoft.ExecuteSQLTask"
+      DTS:DTSID="{0B4C8D71-3E29-4A05-9C6F-71D3B8E204AF}"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="SQL Log Row Count">
+      <DTS:ObjectData>
+        <SQLTask:SqlTaskData xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask"
+          SQLTask:Connection="{7E2B9C10-6F41-4A6B-8C05-1D93B4E7A662}"
+          SQLTask:SqlStatementSource="INSERT INTO dbo.PackageRunLog (PackageName, RunDate, Outcome, RowCountOut) VALUES ('SupplierMaster', GETDATE(), 'OK', ?);">
+          <SQLTask:ParameterBinding
+            SQLTask:ParameterName="0"
+            SQLTask:DtsVariableName="User::RowsWritten"
+            SQLTask:ParameterDirection="Input"
+            SQLTask:DataType="3"
+            SQLTask:ParameterSize="-1"/>
+        </SQLTask:SqlTaskData>
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\SQL Log Failure"
+      DTS:CreationName="Microsoft.ExecuteSQLTask"
+      DTS:DTSID="{E6712A08-54B3-4D9C-8016-9B2F7C0D3E45}"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="SQL Log Failure">
+      <DTS:ObjectData>
+        <SQLTask:SqlTaskData xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask"
+          SQLTask:Connection="{7E2B9C10-6F41-4A6B-8C05-1D93B4E7A662}"
+          SQLTask:SqlStatementSource="INSERT INTO dbo.PackageRunLog (PackageName, RunDate, Outcome, RowCountOut) VALUES ('SupplierMaster', GETDATE(), 'FAILED', 0);"/>
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\SCR Notify Ops"
+      DTS:CreationName="Microsoft.ScriptTask"
+      DTS:Description="mails dwops@copperline.example whichever way the run went"
+      DTS:DTSID="{C29F6B14-8A07-4E32-BD51-3406E7A9C182}"
+      DTS:ExecutableType="Microsoft.ScriptTask"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="SCR Notify Ops">
+      <DTS:ObjectData>
+        <ScriptProject
+          ReadOnlyVariables="User::RowsWritten,User::DropFileName"
+          ScriptLanguage="Microsoft Visual C# 2015"
+          EntryPoint="ScriptMain"/>
+      </DTS:ObjectData>
+    </DTS:Executable>
+  </DTS:Executables>
+  <DTS:PrecedenceConstraints>
+    <DTS:PrecedenceConstraint
+      DTS:refId="Package.PrecedenceConstraints[truncate to dft]"
+      DTS:CreationName=""
+      DTS:DTSID="{11A2B3C4-D5E6-4F70-8192-A3B4C5D6E7F8}"
+      DTS:From="Package\SQL Truncate Staging"
+      DTS:LogicalAnd="True"
+      DTS:ObjectName="truncate to dft"
+      DTS:To="Package\DFT Extract Suppliers"
+      DTS:Value="0"/>
+    <DTS:PrecedenceConstraint
+      DTS:refId="Package.PrecedenceConstraints[truncate to archive]"
+      DTS:CreationName=""
+      DTS:DTSID="{22B3C4D5-E6F7-4081-92A3-B4C5D6E7F809}"
+      DTS:From="Package\SQL Truncate Staging"
+      DTS:LogicalAnd="True"
+      DTS:ObjectName="truncate to archive"
+      DTS:To="Package\FSYS Archive Previous Drop"
+      DTS:Value="0"/>
+    <DTS:PrecedenceConstraint
+      DTS:refId="Package.PrecedenceConstraints[dft ok]"
+      DTS:CreationName=""
+      DTS:DTSID="{33C4D5E6-F708-4192-A3B4-C5D6E7F8091A}"
+      DTS:From="Package\DFT Extract Suppliers"
+      DTS:LogicalAnd="True"
+      DTS:ObjectName="dft ok"
+      DTS:To="Package\SQL Log Row Count"
+      DTS:Value="0"/>
+    <DTS:PrecedenceConstraint
+      DTS:refId="Package.PrecedenceConstraints[dft failed]"
+      DTS:CreationName=""
+      DTS:DTSID="{44D5E6F7-0819-42A3-B4C5-D6E7F8091A2B}"
+      DTS:From="Package\DFT Extract Suppliers"
+      DTS:LogicalAnd="True"
+      DTS:ObjectName="dft failed"
+      DTS:To="Package\SQL Log Failure"
+      DTS:Value="1"/>
+    <DTS:PrecedenceConstraint
+      DTS:refId="Package.PrecedenceConstraints[ok to notify]"
+      DTS:CreationName=""
+      DTS:DTSID="{55E6F708-192A-43B4-C5D6-E7F8091A2B3C}"
+      DTS:From="Package\SQL Log Row Count"
+      DTS:LogicalAnd="False"
+      DTS:ObjectName="ok to notify"
+      DTS:To="Package\SCR Notify Ops"
+      DTS:Value="2"/>
+    <DTS:PrecedenceConstraint
+      DTS:refId="Package.PrecedenceConstraints[failed to notify]"
+      DTS:CreationName=""
+      DTS:DTSID="{66F70819-2A3B-44C5-D6E7-F8091A2B3C4D}"
+      DTS:From="Package\SQL Log Failure"
+      DTS:LogicalAnd="False"
+      DTS:ObjectName="failed to notify"
+      DTS:To="Package\SCR Notify Ops"
+      DTS:Value="2"/>
+  </DTS:PrecedenceConstraints>
+  <DTS:Configurations>
+    <DTS:Configuration
+      DTS:refId="Package.Configurations[SupplierMaster.dtsx.config]"
+      DTS:ConfigurationString="SupplierMaster.dtsx.config"
+      DTS:ConfigurationType="1"
+      DTS:CreationName=""
+      DTS:DTSID="{77081A2B-3C4D-45E6-F708-192A3B4C5D6E}"
+      DTS:ObjectName="SupplierMaster.dtsx.config"/>
+  </DTS:Configurations>
+  <DTS:DesignTimeProperties>
+    <!-- layout only. saved by BIDS, do not hand edit. -->
+  </DTS:DesignTimeProperties>
+</DTS:Executable>

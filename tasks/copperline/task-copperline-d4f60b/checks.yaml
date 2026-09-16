@@ -1,0 +1,166 @@
+# The third of the three real ties DQ-77 left red, and the only one whose model
+# header offers an explanation. The header is two thirds wrong, and the whole of
+# the ticket is finding that out and putting cents on what is left.
+#
+# WHAT THE TIE ACTUALLY COMPARES. `agg_daily_store_sales` reports
+#
+#     variance_cents = till_net_cents - (booked_cents - order_discount_cents)
+#
+# `till_net_cents` sums `raw.pos_sales_header.net_cents` over the transactions
+# that were not voided, and that column is `gross - discount + tax`. The order
+# side is `subtotal_cents - order_discount_cents` and carries no tax at all. So
+# the two sides of the comparison are not the same quantity, and the gap is
+# three things:
+#
+#   TAX       the tax on every till transaction the day kept. It is on one side
+#             of the subtraction and not the other, it is on every store-day
+#             there is, and it is the reason the tie fails on 213,232 of the
+#             213,408 store-days that have both sides. The model header does not
+#             name it.
+#   VOIDS     a voided transaction leaves the till total and stays in the order
+#             book. This is the one reason the header gives that carries money.
+#   DROPPED   `stg_sales__orders` drops `is_test` orders and `deleted_at` rows —
+#             it says so in its own docstring — and the registers sent every one
+#             of them. The header does not name this either.
+#
+# and TAX - VOIDS + DROPPED is the gap, to the cent. The verifier asserts that
+# identity against the world before it grades a word of the reply.
+#
+# THE TWO REASONS THAT ARE WORTH NOTHING, both of which the header gives:
+#
+#   the trading day    "the store's trading day ends at 23:05 store-local and
+#                      the order's date is the local order date". Both dates are
+#                      the same date: `raw.pos_sales_header.business_date` equals
+#                      `raw.orders.local_order_date` on all 1,776,598 till
+#                      transactions that carry an order id, and the verifier's
+#                      first test asserts it. The 23:05 close batch is real — it
+#                      is what STO-419 turns on — and it moves nothing here,
+#                      because neither side of this comparison converts a stamp.
+#   the pre-cutover    "the pre-cutover era has no UTC stamp at all to line them
+#     era              up with". Neither side of the comparison reads
+#                      `event_time_utc`. The till groups on `business_date` and
+#                      the orders on `order_date`, so the column that is NULL
+#                      before 2025-11-03 never enters the arithmetic.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier recomputes the gap, the
+# failing store-days and all three parts from `raw.pos_sales_header` and
+# `raw.orders` in the same session, and reads the figures out of `RESPONSE.md`
+# whatever way round and whatever units the writer chose. The figures quoted in
+# these comments come from the full-profile build and are here to say what the
+# checks are aimed at, not to be compared with anything. Rebuilt from raw the
+# same way at the small profile, the emulation reproduces the model's own row
+# count, failing count and total to the cent — 69,313 / 64,433 / 352,844,153 —
+# which is how the derivation was checked against `dbt run`.
+#
+# COST. No DAG runs, no replays, no dbt. The verifier reads two landed tables
+# and one file.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   repeat the header's three reasons     every verifier figure is absent
+#     with no measurement
+#   put the whole gap on the 23:05        the tax, void and dropped-order
+#     trading day, which the header       figures are absent, and the two
+#     invites                             prose checks want both nil reasons
+#                                         named as nil
+#   measure one week, or one region,      the total is out by two orders of
+#     and scale it up                     magnitude
+#   sum the absolute variances rather     out by a fifth; the ticket asks for
+#     than the signed ones                one signed total, the till less the
+#                                         order book
+#   find the tax and stop                 the void and dropped-order figures
+#   find the tax and the voids and        the dropped-order figure, which the
+#     call the rest rounding              header never hints at
+#   roll the voids and the dropped        the ticket says every cause gets its
+#     orders into one line                own figure. The two are 1,596,054,634
+#                                         and 594,991,647 and their difference
+#                                         is neither
+#   quote the store-day count off the     268 x 862 is 231,016, eight per cent
+#     estate rather than counting it      out, and the check allows one
+#   widen the tolerance, mute the         do_not_modify: dbt/** is a critical
+#     nightly, or rewrite the tie         gate and the ticket says so in words
+#   a note that names no figures          every verifier test
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES. There is more than one honest place to
+# put the tax on a voided transaction: the till drops the whole of it and the
+# order side never had the tax, so a writer may count the void with its tax and
+# the tax over every transaction, or count the void without and the tax over the
+# kept transactions only. Both reconcile to the same gap and both are a
+# measurement, so the two figures are graded loose enough to take either. The
+# same goes for splitting the dropped orders into the test orders and the
+# soft-deleted ones: that is more than the ticket asked for, and the check takes
+# the pair as readily as the sum.
+replay: []
+
+checks:
+
+# The four figures, against the world's own arithmetic. See
+# verifier/test_outputs.py: the gap, the failing store-days, the tax, the voids
+# and the orders the spine drops, every one of them recomputed from raw.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900
+
+# The write-up's claims. Patterns are matched case-insensitively with re.search
+# and are written loose on purpose: each pins a column name, a fact or a
+# direction, never a phrasing, and a table row satisfies them as readily as a
+# sentence.
+
+# The finding the header never names. The three patterns want the two sides of
+# the subtraction named and the asymmetry stated: one side carries tax and the
+# other does not. A reply that says "there is a tax difference" without naming
+# either column has not shown where it looked.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(till_net_cents|net_cents)'
+  - '(booked_cents|order_discount_cents|subtotal_cents)'
+  - '(tax_cents|\btax\b)'
+  - '((includes?|including|carries|carrying|with|plus|added|inclusive of|gross of)[^\n]{0,60}tax|tax[^\n]{0,60}(is|are|sits?|lands?|only|not|never|missing|absent|one side|both sides)|(excludes?|without|net of|before|no)[^\n]{0,20}tax)'
+
+# The trading-day reason, called what it is. The 23:05 close batch is real and
+# the header's mistake is to put it on this tie, so the reply has to name both
+# dates and say the reason moves nothing. The second pattern takes the claim in
+# either order, and takes any of the words a writer reaches for to say nothing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'business_date'
+  - '(local_order_date|order_date)'
+  # The equality words (identical, the same, agree) count only against the
+  # two date columns, where they state the finding. Against the batch they
+  # said nothing — "the 23:05 close batch is the main cause ... on the same
+  # day" satisfied the old pattern while blaming the batch. The batch tokens
+  # now need a says-nothing word.
+  - '((business_date|order_date|local_order_date)[^\n]{0,140}(zero|nil|nothing|none|no cents|0 cents|identical|the same|same date|same day|equal|never differs?|do(es)? not differ|agree|contributes? (no|nothing)|does not (move|contribute|explain|account)|explains? (no|nothing))|(trading day|23:05|close batch)[^\n]{0,140}(zero|nil|nothing|none|no cents|0 cents|never differs?|do(es)? not differ|contributes? (no|nothing)|does not (move|contribute|explain|account)|explains? (no|nothing)|moves? nothing|puts? nothing)|(zero|nil|nothing|identical|the same|same date|equal|never differs?|contributes? nothing|no part)[^\n]{0,140}(business_date|order_date|local_order_date)|(zero|nil|nothing|never differs?|contributes? nothing|no part|moves? nothing)[^\n]{0,140}(trading day|23:05|close batch))'
+
+# The pre-cutover reason, called what it is. `event_time_utc` is NULL for every
+# store transaction before 2025-11-03 and that is a real seam in this world —
+# STO-419 is built on it — but neither side of this comparison reads the column,
+# so it puts nothing in. The reply has to say so.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(event_time_utc|utc stamp|utc column|utc timestamp)'
+  - '((event_time_utc|utc stamp|utc column|utc timestamp|cutover|standardi[sz]ation|pre-?cutover)[^\n]{0,140}(zero|nil|nothing|none|no cents|0 cents|never (read|used|referenced)|not (read|used|referenced|involved)|no part|neither side|does not (enter|appear|move|contribute|explain|account)|is not (in|part))|(zero|nil|nothing|never used|not used|no part|neither side)[^\n]{0,140}(event_time_utc|utc stamp|utc column|cutover))'
+
+# The third part of the gap, which is in no header and in no runbook: the order
+# spine drops the test orders and the soft-deleted ones, and the registers sent
+# both. `stg_sales__orders` says it does this in its own docstring, and finding
+# that docstring is the last step of the measurement.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(is_test|test order)'
+  - '(deleted_at|soft[- ]?delet|deleted order)'
+  - '(stg_sales__orders|staging|order spine|drops?|dropped|excluded|filtered|removed)'
+
+# What an honest tie would compare. Two things: the two sides made the same
+# quantity, and the tie still able to go red for something. The ticket asks for
+# both in as many words, and a reply that answers "compare like with like" and
+# stops has not said what the test would still catch.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(tax_cents|add[^\n]{0,40}tax|include[^\n]{0,40}tax|both sides[^\n]{0,60}tax|tax[^\n]{0,60}both sides|like for like|like with like|same (quantity|basis|footing)|before tax on both|gross of tax on both)'
+  - '(missing[_ ]batch|late[_ ]batch|missing_batches|late_batches|partial file|a batch that|a store that (sent|sends) nothing|short(fall)?|still (go|goes|turn|turns) red|would still (fail|catch|find|go red)|genuine|real (break|difference|gap))'

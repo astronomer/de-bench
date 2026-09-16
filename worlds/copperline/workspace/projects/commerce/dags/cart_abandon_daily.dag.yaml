@@ -1,0 +1,31 @@
+dag_id: cart_abandon_daily
+schedule: "0 8 * * *"
+description: carts started and not ordered, by day and market
+default_args:
+  owner: commerce
+  retries: 2
+tags: [commerce, mart, web]
+steps:
+  wait_for_sessions:
+    blueprint: sensor_wait
+    asset: marts.funnel_daily
+    partition_col: ds
+    timeout: 5400
+    poke_interval: 300
+  build_carts:
+    blueprint: sql_file
+    depends_on: [wait_for_sessions]
+    statement: cart_abandon_build
+    params: ["{{ ds }}"]
+  publish:
+    blueprint: sql_file
+    depends_on: [build_carts]
+    statement: cart_abandon_publish
+    params: ["{{ ds }}"]
+    expect_rows: true
+  export:
+    blueprint: partition_export
+    depends_on: [publish]
+    source: marts.cart_abandon_daily
+    layer: marts
+    order_by: [market_code]

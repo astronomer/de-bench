@@ -1,0 +1,90 @@
+Copperline legacy job inventory,,,,,,,,
+prepared for the orchestrator migration,,,,,,,,
+last updated,2025-11-14,,by,K. Duffy,,,,
+sheet 1 of 1,,,,,,,,
+,,,,,,,,
+,,Schedule,,,Migration,,,
+Seq,Job Name,Frequency,Window,Owner,Wave,Target DAG,Runs On,Notes
+,,,,,,,,
+Nightly - Pentaho,,,,,,,,
+1,nightly_supplier_master,daily,00:40-01:10,K. Duffy,1,sc_ssis_supplier_master,autosys,
+2,nightly_inventory_report,daily,01:10-01:40,K. Duffy,1,sc_tidal_inventory_report,autosys,
+3,nightly_dc_transfer,daily,01:10-01:35,K. Duffy,1,sc_dc_transfer_daily,autosys,
+4,nightly_shrink_weekly,weekly,02:30-03:00,K. Duffy,1,sc_shrink_weekly,autosys,sunday
+5,nightly_lane_performance,daily,01:40-02:00,K. Duffy,1,sc_lane_performance_daily,autosys,
+6,nightly_backorder,daily,01:20-01:45,K. Duffy,1,sc_backorder_daily,autosys,
+7,nightly_dc_capacity,daily,01:45-02:05,K. Duffy,1,sc_dc_capacity_daily,autosys,
+8,nightly_scorecard,weekly,03:00-03:30,K. Duffy,1,sc_supplier_scorecard_weekly,autosys,sunday
+9,nightly_fill_rate,daily,02:00-02:20,K. Duffy,1,sc_fill_rate_daily,autosys,
+10,nightly_store_sales,daily,01:05-02:15,J. Mwangi,2,,autosys,"longest of the load jobs, the west coast stores are the tail"
+11,nightly_price_change,daily,01:05-01:45,S. Rasmussen,2,,autosys,
+12,nightly_markdown,Daily,01:45-02:25,S. Rasmussen,2,,autosys,runs after prices
+13,nightly_promo_calendar,daily,01:05-01:40,S. Rasmussen,3,,autosys,
+14,nightly_stock_ledger,daily,01:30-03:00,K. Duffy,1,sc_stock_ledger_daily,autosys,
+15,nightly_vendor_returns,daily,01:30-02:00,K. Duffy,2,,autosys,
+16,nightly_receipts,daily,01:30-02:20,K. Duffy,2,,autosys,needs the supplier drop
+17,nightly_purchase_orders,daily,01:30-02:15,K. Duffy,3,,autosys,
+18,nightly_gl_extract,daily,02:20-03:40,N. Brandt,2,,autosys,finance will not sign off before wave 3
+19,nightly_ar_aging,daily,03:40-04:20,N. Brandt,3,,autosys,
+20,nightly_customer_master,daily,01:30-02:15,L. Baptiste,1,cus_customer_master_daily,autosys,
+21,nightly_freight_accrual,daily,01:40-02:15,K. Duffy,2,,autosys,
+22,nightly_store_targets,weekly,02:30-02:55,J. Mwangi,3,,autosys,sunday
+23,nightly_edi_852,daily,00:30-00:50,K. Duffy,3,,autosys,check with the EDI team
+,,,,,,,,
+Staging and file watch,,,,,,,,
+24,cpl.stage.pos.watch,daily,23:30-01:00,dwops,,,autosys,file watcher
+25,cpl.stage.pos.batch,daily,01:00-01:05,dwops,,,autosys,
+26,cpl.stage.wms.movements,daily,01:00-01:20,dwops,,,autosys,
+27,cpl.stage.erp.gl,daily,01:00-01:30,dwops,,,autosys,
+28,cpl.stage.erp.costing,daily,01:00-01:30,dwops,,,autosys,
+29,cpl.stage.files.supplier,daily,00:40-01:00,dwops,,,autosys,file watcher
+30,cpl.stage.files.freight,daily,01:00-01:15,dwops,,,autosys,
+,,,,,,,,
+Kettle calls,,,,,,,,
+31,cpl.nightly_stock_ledger.run,daily,01:30-03:00,dwops,,,autosys,
+32,cpl.nightly_gl_extract.run,daily,02:20-03:40,dwops,,,autosys,
+33,cpl.nightly_store_targets.run,weekly,02:30-02:55,dwops,,,autosys,
+,,,,,,,,
+Post load checks,,,,,,,,
+34,cpl.nightly_stock_ledger.check,daily,03:00-03:10,dwops,,,autosys,
+35,cpl.nightly_gl_extract.check,daily,03:40-03:50,dwops,,,autosys,
+36,cpl.nightly_ar_aging.check,daily,04:20-04:30,dwops,,,autosys,
+37,cpl.nightly_freight_accrual.check,daily,02:15-02:25,dwops,,,autosys,
+,,,,,,,,
+Recon,,,,,,,,
+38,cpl.recon.stock.tie,daily,03:10-03:30,K. Duffy,,,autosys,
+39,cpl.recon.gl.tie,daily,04:30-04:55,N. Brandt,,,autosys,trading days
+40,cpl.recon.freight.tie,daily,02:25-02:40,K. Duffy,,,autosys,
+,,,,,,,,
+Distribution,,,,,,,,
+41,cpl.dist.stores.pack,daily,05:00-05:40,dwops,,,autosys,268 files
+42,cpl.dist.stores.send,daily,05:40-06:10,dwops,,,autosys,
+43,cpl.dist.merch.pack,daily,05:00-05:20,S. Rasmussen,,,autosys,
+44,cpl.dist.finance.pack,daily,05:00-05:20,N. Brandt,,,autosys,trading days
+45,cpl.weekly.targets.dist,weekly,05:00-05:20,J. Mwangi,,,autosys,monday
+,,,,,,,,
+Periodic,,,,,,,,
+46,cpl.month_end.gl_close.run,monthly,06:00-08:00,N. Brandt,,,autosys,fifth business day
+47,cpl.util.purge.stage,weekly,04:00-05:00,dwops,,,autosys,
+48,cpl.util.archive.logs,weekly,04:00-04:45,dwops,,,autosys,off
+,,,,,,,,
+Boxes,,,,,,,,
+49,cpl.nightly,daily,01:00-06:00,dwops,,,autosys,
+50,cpl.nightly.stage,daily,01:00-01:30,dwops,,,autosys,
+51,cpl.nightly.load,daily,01:05-04:20,dwops,,,autosys,
+52,cpl.nightly.recon,daily,03:10-04:55,dwops,,,autosys,trading days
+53,cpl.nightly.dist,daily,05:00-06:10,dwops,,,autosys,trading days
+54,cpl.weekly,weekly,05:00-05:20,dwops,,,autosys,monday
+55,cpl.month_end,monthly,06:00-08:00,dwops,,,autosys,
+56,cpl.util,weekly,04:00-05:00,dwops,,,autosys,
+,,,,,,,,
+Windows,,,,,,,,
+57,SupplierMaster,daily,00:20-00:40,K. Duffy,1,sc_ssis_supplier_master,sql agent,ssis package on CPLBI01
+,,,,,,,,
+Northwave (acquired 2025-02),,,,,,,,
+58,nwv_daily_sales,daily,02:00-02:30,L. Baptiste,,,northwave af,their own airflow
+59,nwv_account_sync,daily,02:30-02:50,L. Baptiste,,,northwave af,
+60,nwv_stock_feed,daily,03:00-03:20,L. Baptiste,,,northwave af,
+61,nwv_planogram_feed,weekly,03:20-03:50,L. Baptiste,,,northwave af,
+,,,,,,,,
+,,,,,,,,not carried over from the 2023 sheet: anything under cpl.dr

@@ -1,0 +1,80 @@
+# The overlay hoists the delivery date into a `delivery_date` lake task and
+# hands the value to the four steps below it, the way a TaskFlow refactor
+# ordinarily would. It looks right and it is right every night: a lake task's
+# return over XCom is the NEWEST manifest entry for that task, by interval,
+# and on a forward run the newest entry is the run's own. On a replay an entry
+# for a later morning already exists, so every step below gets that morning
+# instead — `include/lib/pipeline.py`, `lake_task` clause 1, which growth's
+# `CONVENTIONS.md` tells the reader to open before copying a neighbour. The
+# world ships the DAG correct, writing `{{ ds }}` out in each step, and its
+# docstring says why; the overlay strips that sentence and replaces it with
+# the refactor's own reason.
+#
+# Nothing here holds an authored value. Every expected result is computed from
+# `raw.ads_spend_daily` and `raw.fx_rates` in the verifier's own session.
+#
+# WHY A VERIFIER RUNS THE DAG RATHER THAN `dag_runs`. The fault needs two runs
+# in a fixed order — a later morning, then an earlier one. The execute stage
+# runs a date set in ascending order, which is the one order that hides this.
+# The verifier builds the sequence itself: 2026-05-29 forward, then 2026-04-21
+# and 2026-03-24 as replays, from a cleared run record. Three runs, about a
+# minute of scoring.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code change    verifier: the six
+#                                                      replay tests
+#   the record patched by hand                         verifier: the record is
+#                                                      cleared before the runs
+#   the DAG or the module broken                       dag_parses
+#   the four steps left taking the hoisted value       verifier: both replays
+#   only `restatements` scoped, `fx_coverage` left     verifier: the missing
+#                                                      rates tests
+#   the value read back with `.output` or `xcom_pull`  verifier: same, those
+#     instead of `manifest.get`                        are the same read
+#   the morning taken from the previous run rather     verifier: 2026-03-24
+#     than from this interval                          runs after 2026-04-21
+#   the fix special-cased to the ticket's five days    verifier: none of the
+#                                                      three graded mornings
+#                                                      is named in the ticket
+#   the landing step dropped, or its day left stale    verifier: each replayed
+#                                                      morning's rows are
+#                                                      removed first and have
+#                                                      to come back
+#   the entries filed under a made-up interval         verifier: the record is
+#                                                      read by the morning's
+#                                                      own date
+#
+# WHAT ALSO PASSES, and should. Three fixes pass, and all three need the same
+# finding:
+#
+#   read the day back with `manifest.get("delivery_date")` in each step
+#   take the day from `get_current_context()` inside each step
+#   revert the hoist and write `{{ ds }}` out again, which is what the world
+#     ships — measured, it passes all ten tests
+#
+# Making `delivery_date` a plain `@task` passes too: a plain task's return goes
+# to XCom as itself and is scoped to the run that pushed it. That is the same
+# finding read from the other end and it is a fair answer.
+#
+# The ticket asks for a replayed morning to come out as that morning. It does
+# not ask for the hoisted task to survive, so no check pins `delivery_date` in
+# place.
+#
+# `dag_structure` is deliberately absent for the same reason: its task-id set
+# is exact, so it would force a choice between the two honest fixes. The
+# verifier guards the shape where it matters instead — a gutted DAG records
+# nothing and lands nothing.
+replay: []
+
+checks:
+
+# The tree still imports and the DAG is still there.
+- kind: dag_parses
+  dag_id: gro_marketing_spend_intake
+
+# The substance. See verifier/test_outputs.py — one forward morning, two
+# replays, and the two things a replay owes: its own record and its own rows.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 1200

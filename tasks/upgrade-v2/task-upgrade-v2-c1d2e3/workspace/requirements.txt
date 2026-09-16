@@ -1,0 +1,2 @@
+apache-airflow==2.10.5
+apache-airflow-providers-standard==0.3.0

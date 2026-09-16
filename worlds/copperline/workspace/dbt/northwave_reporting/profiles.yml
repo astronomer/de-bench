@@ -1,0 +1,8 @@
+northwave:
+  target: prod
+  outputs:
+    prod:
+      type: duckdb
+      path: "{{ env_var('COPPERLINE_HOME', '../..') }}/{{ env_var('NORTHWAVE_DUCKDB', 'warehouse/northwave.duckdb') }}"
+      threads: 2
+      schema: nwv

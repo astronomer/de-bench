@@ -1,0 +1,40 @@
+feature_engineering:
+  default_args:
+    start_date: 2024-05-01
+    owner: ml-platform
+  schedule: '@daily'
+  catchup: false
+  tasks:
+    extract_events:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo extract_events
+    compute_features:
+      operator: airflow.providers.cncf.kubernetes.operators.pod.KubernetesPodOperator
+      namespace: ml-jobs
+      image: registry.internal/feature-builder:2.4.1
+      cmds: ["python", "-m", "features.build"]
+      name: compute-features
+      resources:
+        __type__: kubernetes.client.models.V1ResourceRequirements
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 8Gi
+      volumes:
+        - __type__: kubernetes.client.models.V1Volume
+          name: feature-cache
+          host_path:
+            __type__: kubernetes.client.models.V1HostPathVolumeSource
+            path: /mnt/feature-cache
+      volume_mounts:
+        - __type__: kubernetes.client.models.V1VolumeMount
+          name: feature-cache
+          mount_path: /var/cache/features
+      get_logs: true
+      dependencies: [extract_events]
+    publish_features:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo publish_features
+      dependencies: [compute_features]

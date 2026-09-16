@@ -1,0 +1,130 @@
+# The summary is `dbt/copperline_analytics/models/commerce/settlement_weekly.sql`
+# and it books the credit the wrong way round:
+#
+#     sum(s.fulfilment_fee_cents + s.refund_cents) as fee_cents
+#
+# `int_settlement_matched` pivots the settlement lines on `magnitude_cents`, so
+# `refund_cents` reaches this model as a positive number with its direction
+# stripped off. The line itself is negative — `stg_marketplace__settlements`
+# says so in as many words, and `worlds/copperline/DBT-NOTES.md` lists the feed
+# as one that signs itself — because a credit hands part of the commission back
+# to the seller. Adding it puts the credit on the wrong side twice: the pair of
+# held-back columns comes out over by two credits rather than under by one.
+# The world ships it that way; nothing here is planted.
+#
+# What makes it more than a sign is that two other things on the same summary
+# are also wrong and neither is this ticket. `payout_cents` sums
+# `seller_net_cents`, which reads the principal line as the seller's net — that
+# is DQ-91 (`task-copperline-2fa6d8`), and its solution fixes it in
+# `int_settlement_matched`. The DAG-side `settlement_publish.sql` writes the
+# same mart name with a bare INSERT — that is LF-1042
+# (`task-copperline-e7c30b`). The ticket puts both out of scope by name and the
+# `do_not_modify` list holds the intermediate model and `projects/**` shut, so
+# an agent that goes after the loudest defect on the page has not done this
+# one.
+#
+# WHICH COLUMN CARRIES THE CREDIT IS NOT GRADED. `contracts/settlement-summary.md`
+# SS-1 defines `commission_cents` and `fee_cents` and says the payout is the
+# order value less both. It does not say which of the two a credit comes off,
+# and the feed gives an argument for either: the credit is minted as a reversal
+# of commission (`upstream/external.py`), and the shipped model books it against
+# the fee. The verifier grades the pair together and requires the commission
+# column to be either the posted commission or the posted commission net of the
+# credits, which admits both readings and convicts neither.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier computes every expected
+# result from `raw.marketplace_orders`, `raw.marketplace_settlements` and
+# `raw.fiscal_calendar` in the same session, and it takes what Copperline kept
+# off the sign the feed writes rather than off a list of line types typed here.
+#
+# WHY DBT RUNS. `marts.settlement_weekly` is a dbt table and the world ships the
+# landed half of the warehouse only (`AGENTS.md`, "The warehouse"), so it does
+# not exist until dbt has made it. The prepare step builds it and its upstream —
+# ten models, about a second. No DAG replays.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code change  verifier: the held-back pair
+#   `refund_cents` dropped from the fee instead of   verifier: same. The week is
+#     signed (the half-fix)                          still out by one credit
+#   the credit netted against `payout_cents` and     verifier: same
+#     the two held-back columns left alone
+#   the whole take moved into one column             verifier: the commission
+#                                                    column test
+#   `gmv_cents` reduced by the credit so that SS-1   verifier: the order-value
+#     closes                                         test
+#   the summary re-cut on the week the credit        verifier: the seller-weeks
+#     posted                                         in the summary move
+#   the model filtered to the weeks that look right  verifier: same
+#   a column `marts.dispute_daily` reads dropped     verifier: the reader still
+#                                                    builds
+#   the model deleted or broken                      verifier: the prepare step,
+#                                                    reported by the fixture
+#   "a credit is a cost, so it adds to the fee"      file_contains: the direction
+#   "we are out by the credit"                       file_contains: twice, not
+#                                                    once
+#   "the week the credit posted is the wrong week"   file_contains: the week the
+#                                                    order was placed
+#
+# TWO DEFENSIBLE ALTERNATIVES THAT PASS, and should.
+#
+#   * The credit netted against `commission_cents` and the fee left as the
+#     fulfilment fee alone. That is the reading the feed's own minting supports
+#     and the ticket does not choose between them.
+#   * The pivot's double count repaired inside this model as well. DQ-91 owns
+#     that and this ticket says so, but a reply that also collapses a refunded
+#     order to one row has not broken anything: the order-value test takes the
+#     week's GMV counted once an order as readily as counted once a payout.
+
+replay: []
+
+checks:
+
+# The substance: the summary against the feed it is built from, the grain, the
+# order value, and the mart that reads it. See verifier/test_outputs.py.
+- kind: pytest_verifier
+  file: test_outputs.py
+  prepare:
+  - cd dbt/copperline_analytics && /opt/dbt-venv/bin/dbt run --select +settlement_weekly --profiles-dir .
+  timeout: 900
+
+# The three lines seller-ops asked for. Patterns are matched case-insensitively
+# with re.search and are written loose on purpose: each pins a named thing or a
+# direction, never a phrasing, and a table row satisfies them as readily as a
+# sentence.
+
+# Line one: what the fourth line type is, and which way it moves what Copperline
+# kept. The name on its own is not an answer — the shipped model names it too
+# and still adds it — so the second pattern wants the direction, which is the
+# whole of the finding.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(refund|credit note|credit memo)'
+  - '((reduc|revers|hands? back|handed back|gives? back|given back|credits? back|comes? off|came off|taken off|takes? off|subtract|deduct|net(ted)? off|lower|smaller)[^\n]{0,90}(take|commission|fee|kept|keep|held back|hold back|holds back)|(take|commission|fee|kept|keep|held back|hold back|holds back)[^\n]{0,90}(reduc|revers|hands? back|handed back|gives? back|given back|credits? back|comes? off|came off|taken off|takes? off|subtract|deduct|net(ted)? off|lower|smaller|goes down|comes down|falls))'
+
+# Line two: how far out. The credit was added where it should have come off, so
+# the held-back figure is over by two credits and not by one. A reply that says
+# "we are out by the refund" has read half of it.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((twice|double|doubl|two times|2 ?[x×]|both ways|wrong side)[^\n]{0,90}(refund|credit|return)|(refund|credit|return)[^\n]{0,90}(twice|double|doubl|two times|2 ?[x×]|both ways|wrong side))'
+
+# Line three: which week a credit lands in, and why a week that has already gone
+# out still moves. The summary is cut on the week the order was placed, and the
+# credit arrives with a payout run three weeks after the one that carried the
+# commission — so it restates a week that closed a month earlier, and the mart
+# is rebuilt whole every night. Either half of the "why" is an answer.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # Affirmative on purpose: the bare "placed" and the loose order-near-week
+  # windows matched their own denial — "lands in the week the payout run
+  # posted, not the order week" — so the pattern now wants the credit put IN
+  # the order's week, in any spelling, markup allowed around the words.
+  - '((lands?|sits?|falls?|belongs?|is cut|cut|keyed|counted|booked|posted|goes|ends? up)(?:(?!\bnot\b)[^\n]){0,40}(the )?\W{0,3}(order\W{0,3}s own|original|order|placed|sale)\W{0,3} ?(was )?\W{0,3}week|(the )?\W{0,3}week (the |it was )?\W{0,3}(order|it)\W{0,3} ?(was )?\W{0,3}(placed|sold|ordered|taken)|(lands?|sits?|falls?|belongs?|counted|booked|goes|ends? up)(?:(?!\bnot\b)[^\n]){0,40}week of the ?\W{0,3}order|cut on the \W{0,3}order\W{0,3}s?\W{0,3} ?date|order[_ ]date[^\n]{0,40}(is|as|decides|owns)[^\n]{0,20}(the )?(week|cut|grain))'
+  # The lag alternation generalized after a trace audit: "about a month after
+  # the order (25-36 days on this feed)" is the same fact as "weeks later",
+  # and "republished under SS-3" the same as "rebuilt".
+  - '((three|3) weeks|21 day|later payout|different payout|next payout|second payout|payout[^\n]{0,50}later|(a )?(month|weeks?|days?)[^\n]{0,20}(after|later)|posts? later|posted later|arrives? later|lands? later|rebuil|republish|every night|whole table|nightly)'

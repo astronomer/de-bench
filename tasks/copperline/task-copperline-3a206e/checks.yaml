@@ -1,0 +1,106 @@
+# The ticket asks for one statement: the product history, spanned out of
+# Palette's change feed, under the contract the prompt states. The feed is
+# 21,000 changes over 1,860 SKUs and every awkward thing in it is a thing the
+# contract has a rule for — arrivals that overtook each other, dates that carry
+# two changes from two systems, deletes that end a record, deletes that a later
+# upsert undoes. A build that reads the feed as "newest row per SKU wins" gets
+# a table that looks right, ties to the SKU count, and answers every as-of
+# question with today's price.
+#
+# Nothing here holds an authored value, an authored SKU or an authored date.
+# The verifier computes the expected history from `raw.pim_product_versions` in
+# the same session and finds each population by asking the feed which SKUs carry
+# it. The prompt names no SKU and no date at all.
+#
+# WHY NOTHING RUNS THE DAG. `AGENTS.md`, "The warehouse": the world ships the
+# landed half only, so `marts.*` is not on disk. Three of
+# `product_snapshot_daily`'s five steps shell out to `/opt/dbt-venv` against a
+# warehouse a nightly has already filled — two dbt snapshots and a dbt run — so
+# `airflow dags test` stops there whatever the agent writes. The prompt says so
+# and puts them out of scope. The verifier makes the `marts` schema and runs the
+# statement the ticket names, which grades the same code in two seconds.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered                        verifier: no statement at
+#                                            projects/commerce/sql/…, named
+#   the deletes filtered out before the      verifier: the retirements and the
+#     span ends are computed (the natural    resurrections. This is the one to
+#     way to write it)                       expect: the row count is right, the
+#                                            span count is right, and every
+#                                            retired SKU still has an open row
+#   ordered on `received_at`                 verifier: the late arrivals, and
+#                                            the as-of probe
+#   no same-day rank                         verifier: the same-day pairs — the
+#                                            loser opens a span the winner
+#                                            closes on the same date
+#   the delete kept as a span of its own     verifier: the retirements read as
+#                                            live rows carrying the delete's
+#                                            attributes
+#   the newest row per SKU, one open span    verifier: six of the nine tests
+#   `valid_from`/`valid_to` as timestamps    verifier: the as-of probe, which
+#     rather than dates                      reads the columns as they were
+#                                            built. A change made at 13:47 is in
+#                                            force from that day, and a reader
+#                                            comparing a business date against a
+#                                            mid-afternoon stamp misses it
+#   the table appended rather than replaced  verifier: the second-run test
+#   the statement written but not hung on    dag_structure
+#     the DAG
+#   an extra step, or a step renamed         dag_structure — the prompt says the
+#                                            DAG keeps its four steps and gains
+#                                            one, and names it
+#   the dbt model rewritten instead          do_not_modify (dbt/**), and the
+#                                            verifier: the warehouse table is
+#                                            still not there
+#   the feed edited to remove the mess       do_not_modify has no hold on
+#                                            `raw.*`, but the verifier reads the
+#                                            warehouse the scorer rebuilt from
+#                                            the image, so an edited feed moves
+#                                            neither side
+#
+# WHAT IS NOT CONVICTED, on purpose. The contract's same-day tie-break is
+# `pim_ui` > `supplier_feed` > `bulk_load`, and on this feed a build that ranks
+# on the later stamp alone and never looks at `source` produces the identical
+# table: measured, 0 rows differ. Where a date carries two changes from two
+# systems, the stronger source is also the later stamp. The rule is stated
+# because the contract has to state it and because a feed that stops agreeing
+# would need it, not because it separates answers here. A build that ignores
+# `source` passes, and that is the right outcome — the ticket's contract is
+# satisfied either way.
+#
+# The `marts` schema: the verifier makes it before running the statement, the
+# way a night of the nightly would have. A file that carries its own
+# `CREATE SCHEMA` beside the build runs too — the statement is executed as it
+# was written.
+replay: []
+
+checks:
+
+# The tree still imports and the DAG is still there. An import error here takes
+# the commerce package down with it.
+- kind: dag_parses
+  dag_id: product_snapshot_daily
+
+# The house shape holds: the two snapshots, the dbt build, the history, the
+# grain check. The prompt names the new step and where it sits. A statement
+# written and never hung on the DAG leaves the nightly producing what it
+# produces today, which is the state the ticket is complaining about.
+- kind: dag_structure
+  dag_id: product_snapshot_daily
+  task_ids:
+  - snapshot_product_price
+  - snapshot_product_attrs
+  - build_dim_product
+  - build_product_history
+  - check_snapshot_grain
+  operators:
+    build_product_history: PythonOperator
+    check_snapshot_grain: PythonOperator
+    build_dim_product: BashOperator
+
+# The substance. See verifier/test_outputs.py — the whole feed spanned, then
+# each population the contract has a rule for, then an as-of read of every
+# change date and the day after it, then a second run.
+- kind: pytest_verifier
+  file: test_outputs.py

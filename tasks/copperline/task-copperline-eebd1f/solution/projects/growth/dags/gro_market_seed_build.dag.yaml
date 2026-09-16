@@ -1,0 +1,56 @@
+# Rebuilds `seeds/markets.csv`, the list of markets the pricing models build
+# from, and loads it.
+#
+# The seed and `raw.market_config` are two different lists and that is on
+# purpose: the table holds every market that exists commercially, the seed
+# holds the markets that are in the marts. `docs/runbooks/market-setup.md`
+# owns the distinction. The list below is this team's, and adding a market to
+# it is the piece of work that puts that market in reporting.
+#
+# The second wave — BR, MX, PL and ID — joined the list under GTM-77. Their
+# currencies and entities are not typed here: the step reads both from
+# `raw.market_config`, which MKT-1 makes the record for them.
+#
+# Weekly, on Monday morning, because a market opens perhaps twice a quarter
+# and a daily rebuild of a nine-row file is noise in the diff.
+dag_id: gro_market_seed_build
+schedule: "0 8 * * 1"
+description: rebuild and load the markets seed the pricing models read
+start_date: 2026-01-05
+tags: [growth, pricing, seed, blueprint]
+default_args:
+  owner: growth
+  retries: 2
+
+steps:
+  wait_for_config:
+    blueprint: sensor_wait
+    asset: raw.market_config
+    partition_col: null
+    poke_interval: 300
+    timeout: 3600
+    mode: reschedule
+
+  write_seed:
+    blueprint: seed_file
+    depends_on: [wait_for_config]
+    source: raw.market_config
+    name: markets
+    columns:
+      market_code: market_code
+      billing_currency: currency
+      entity_code: entity
+    where: "market_code IN ('US', 'CA', 'GB', 'IE', 'DE', 'BR', 'MX', 'PL', 'ID')"
+    order_by: [market_code]
+
+  load_seed:
+    blueprint: dbt_select
+    depends_on: [write_seed]
+    command: build
+    select: markets
+
+  rebuild_dependents:
+    blueprint: dbt_select
+    depends_on: [load_seed]
+    select: "markets+"
+    exclude: markets

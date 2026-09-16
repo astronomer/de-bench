@@ -1,0 +1,96 @@
+# The deliverable is a written answer, so every check reads RESPONSE.md.
+#
+# Nothing here is authored. Each graded fact is read straight off the shipped
+# tree, and the derivation is written beside the check that grades it:
+#
+#   the append default and the fallback   include/lib/loaders.py, the
+#                                         `CsvToWarehouseOperator` docstring and
+#                                         `_load`
+#   the twenty periods                    `wc -l landing/carriers/brfr/invoices.csv`
+#                                         is 21 lines, so 20 invoices, and
+#                                         `select count(distinct invoice_date)`
+#                                         over the same file is 20. Measured in
+#                                         the world's own image; the other two
+#                                         carrier files are cut the same way
+#   the safe appends                      the six call sites that pass
+#                                         `mode="append"` or pass no mode at all,
+#                                         and the step or task beside each of them
+#
+# THE WRONG-ANSWER BATTERY.
+#
+#   "every load in the estate is safe; they all pass both arguments"
+#       True by call and it is not the answer. Check 3 and check 4 convict it:
+#       the carrier invoice feed passes both arguments and is still not safe,
+#       because its files are not dated.
+#
+#   "the marketplace, returns, price-change and CRM loads append, so they double"
+#       The false positive. Four of them land in a stage the run empties first
+#       and two land in a change-feed inbox whose merge keeps the newest row per
+#       key. Check 5 wants the reason, so a reply that lists them as exposed
+#       without the reset or the merge cannot pass it.
+#
+#   "the fix is to change the default in include/lib/loaders.py"
+#       The floor convicts it: include/lib/** is protected, so the patch does
+#       not apply. The ticket also says so in as many words.
+#
+#   "mode=replace is enough"
+#       Check 2 convicts it. `replace` without `partition_col` is accepted,
+#       logs one line at INFO and loads as an append.
+#
+#   A defensible reading this does NOT convict: naming
+#   `gro_email_engagement_daily` as a second job worth a look. Its
+#   `partition_col` is the expression `event_time_utc::DATE` rather than a
+#   column name, which is unusual enough to stop at, and the yaml's own comment
+#   explains it. A reply that raises it and then clears it is right; a reply
+#   that raises it and stops has not answered the third question.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# 1. The default. `mode` is "append" unless the call says otherwise, and the
+# load has no key check and no dedup, so the same file twice is the rows twice.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(append[^\n]{0,60}(is the |by )?default|default[^\n]{0,60}append)'
+
+# 2. The quieter one, and the whole point of the ticket's second sentence:
+# `mode="replace"` with no `partition_col` is accepted, logged at INFO and
+# loaded as an append. A reply that stops at the default has found half of it.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'partition_col'
+  - '(replace[^\n]{0,90}partition_col|partition_col[^\n]{0,90}replace)'
+  - '(append[^\n]{0,60}(instead|anyway|silently|quietly)|(instead|anyway|silently|quietly)[^\n]{0,60}append|fall(s|ing)? back[^\n]{0,60}append|(loads?|loading|loaded|treated|written|behaves?|acts?|reverts?|degrades?)[^\n]{0,30}as (an |a )?append|and (it )?appends|is not a replace|not a replace at all)'
+
+# 3. The job. The carrier invoice intake is the feed the incident was about and
+# the one the two arguments cannot save.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'sc_carrier_invoice_intake'
+
+# 4. Why it cannot be saved, with the figure that shows it. Each carrier's
+# `invoices.csv` is keyed by carrier rather than by date and carries every
+# period still in retention — twenty invoices on twenty invoice dates — while a
+# `replace` deletes ONE `partition_value`. So nineteen of the twenty come back
+# on top of rows that are already there. The number has to sit against the
+# thing it counts, not merely appear.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(\b20\b|twenty)[^\n]{0,60}(invoice|period|month|date)|(invoice|period|month|date)[^\n]{0,60}(\b20\b|twenty)'
+  - '(not dated|undated|no date|not keyed by date|keyed by carrier|by carrier rather than|whole file|every period|all the periods|periods still in retention|more than one (invoice )?date|many (invoice )?dates|twenty (invoice )?dates)'
+
+# 5. The appends that are right to append. Two idioms, and the reply has to give
+# the reason for at least one of them or it has not distinguished a safe append
+# from an unsafe one: a stage the run empties before it fills, and a change-feed
+# inbox whose merge keys on the id and keeps the newest row.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(stag(e|ing)|inbox)'
+  - '(reset|empt|drop(s|ped|ping)?|truncat|clear)[^\n]{0,60}(stag(e|ing)|table)|(stag(e|ing))[^\n]{0,60}(reset|empt|drop|truncat|clear)|merge[^\n]{0,80}(key|id|newest|latest)|(key|newest|latest)[^\n]{0,80}merge'

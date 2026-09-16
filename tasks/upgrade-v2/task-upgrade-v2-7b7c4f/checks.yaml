@@ -1,0 +1,9 @@
+checks:
+- kind: scoring_primitive
+  name: loader_uses_load_yaml_dags
+- kind: scoring_primitive
+  name: yaml_uses_schedule_not_schedule_interval
+- kind: scoring_primitive
+  name: dag_factory_pin_uplifted
+- kind: scoring_primitive
+  name: dag_factory_providers_declared

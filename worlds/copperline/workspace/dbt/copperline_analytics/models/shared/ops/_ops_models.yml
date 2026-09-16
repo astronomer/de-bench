@@ -1,0 +1,25 @@
+# The platform team's own bookkeeping. No mart reads either of these.
+
+version: 2
+
+models:
+
+  - name: ops_audit_log
+    columns:
+      - name: audit_key
+        tests: [unique, not_null]
+      - name: opened_at
+        tests: [not_null]
+
+  - name: ops_build_manifest
+    columns:
+      - name: model_name
+        tests: [unique, not_null]
+      - name: layer
+        tests:
+          - accepted_values:
+              values: ['stg', 'int', 'dim', 'ops', 'mart']
+      - name: owning_team
+        tests:
+          - accepted_values:
+              values: ['platform', 'commerce', 'growth', 'supply', 'finance', 'customer']

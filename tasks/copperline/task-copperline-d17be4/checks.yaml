@@ -1,0 +1,120 @@
+# The ask is one step of one job: fill `ops.dispute_open_daily` from the dispute
+# record. The step it replaces reads `entity` and `open_disputes` off
+# `marts.dispute_daily`, which carries neither, so the table has never held a
+# row. Finding that is cheap — the ticket says where it is. The work is the
+# three decisions behind the four numbers, and every one of them has a plausible
+# wrong answer that runs and produces a table.
+#
+# DECISION 1 — the open population is point-in-time, not current state.
+# `raw.disputes.dispute_status` says where a dispute stands now. A day's row has
+# to say what stood open on that day, which comes off `raised_on` and
+# `resolved_on`: raised on or before the day, not resolved by the end of it. The
+# pull towards the status column is strong — it is called `dispute_status`, the
+# staging model derives `is_open` from it, `marts.dispute_daily` carries an
+# `open_dispute_count` built the same way, and §REV-10's own sentence "a row
+# with `resolved_on` NULL is open, whatever its age" reads like an instruction
+# to filter on state. The ticket says a day is that day's position and gives the
+# February-to-April dispute as the example, so the reading is stated; taking the
+# status column anyway is not a defensible alternative, it is not reading.
+#
+# DECISION 2 — §REV-10 decides the write-off, and it is exact. Only `settled` is
+# the customer's favour. It books `settled_cents`, the amount given up, on
+# `resolved_on`. `upheld` means the invoice was upheld and `rejected` means the
+# dispute was rejected; both are Copperline's favour and book nothing.
+# `disputed_cents` is what the customer claimed and never books at all.
+#
+# DECISION 3 — the entity comes off the invoice. `raw.disputes` has an `owner`
+# column holding `credit.03` and the like, which is the collections analyst.
+# `raw.invoices.entity_code` is the entity, and the join is the only way to it.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   the population taken from             the three day tests. The status
+#   `dispute_status = 'open'`             answer is the same figures on every
+#                                         day asked for, and the second guard
+#                                         test proves the days can tell them
+#                                         apart before any of them grades
+#   open counted as `resolved_on IS       the three day tests. It is the status
+#   NULL`, with no date in the test       answer under another name: a dispute
+#                                         with no resolution date is exactly the
+#                                         one whose status is `open`
+#   `written_off_cents` summed from       the three day tests. The second guard
+#   `disputed_cents`, whether over the    test holds each day to a claimed total
+#   settled closures or over all of them  that differs from the amount given up
+#   the open boundary read the other      the three day tests. The ticket pins
+#   way, so a dispute closed on the day   the boundary in words — a dispute
+#   is still open on it                   closed on a day leaves the open figure
+#                                         on that day — so this is a misreading
+#                                         rather than an alternative
+#   the write-off dated on `raised_on`    the three day tests: a dispute raised
+#   rather than `resolved_on`             on the day is in the open figure and
+#                                         books nothing
+#   the entity taken from `owner`         the three day tests: `credit.03` is
+#                                         not an entity code
+#   the position built only for the       the day six months before the window
+#   months the ticket asks for
+#   a bare INSERT into the day            the rerun test: the day doubles
+#   the table emptied and rewritten       the second-day test: building one day
+#   on every run                          empties the other
+#   the mart taught to carry an entity    the world floor — `dbt/**` is
+#   instead                               protected, and the ticket says the
+#                                         mart is another ticket
+#   a fifth step added to create the      dag_structure: the task-id set is
+#   table                                 exact, and the ticket says the job
+#                                         keeps the four steps it has
+#   the job or the module broken          dag_parses
+#
+# WHAT PASSES THAT IS NOT THE REFERENCE FIX, and is accepted:
+#
+#   the position assembled out of two     the verifier reads the table, not the
+#   queries, or a union of an open set    query
+#   and a closed set
+#   an entity with nothing on the day     the verifier drops all-zero rows from
+#   written as a row of zeros             both sides before comparing. A zero is
+#                                         not a wrong number, and the ticket
+#                                         does not turn it into one
+#   the table created by DDL held in a    the ticket asks for the create where
+#   `sql/` file, as long as the write     the write is; a file beside it is the
+#   step still runs it                    same thing and reads better
+#   `settled_cents` summed over every     it is the same figure. The record
+#   closure on the day, with no status    carries no settled amount on a dispute
+#   filter at all                         that did not settle, so the status
+#                                         filter §REV-10 asks for costs nothing
+#                                         here. It is a weaker answer than the
+#                                         clause and it is not a wrong number,
+#                                         so it passes and is meant to
+#
+# No expected figure is authored. The verifier computes every one from
+# `raw.disputes` and `raw.invoices` in the same session, and checks each graded
+# day for discrimination before it grades anything.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# The job still imports and the bag is clean.
+- kind: dag_parses
+  dag_id: fin_invoice_dispute_daily
+
+# The four steps stay. The ticket says the mart rebuild, the cents check and the
+# publish belong to another ticket, and an exact task-id set is also what stops
+# the create being bolted on as a fifth step the write does not depend on.
+- kind: dag_structure
+  dag_id: fin_invoice_dispute_daily
+  task_ids:
+  - build
+  - check
+  - open_count
+  - publish
+  operators:
+    build: BashOperator
+    check: PythonOperator
+    open_count: PythonOperator
+    publish: PythonOperator
+
+# The substance. See verifier/test_outputs.py: three days, the position on each
+# of them, a rerun, and a second day left alone.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

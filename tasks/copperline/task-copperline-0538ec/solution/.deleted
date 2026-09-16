@@ -1,0 +1,7 @@
+# tie_channel_mix_daily_channel_coverage asserts that store, web and
+# marketplace add up to the day's booked total. There are four channels. No
+# contract states the rule, so QC-1 puts it out of the mart layer and there is
+# nothing to re-derive it against: the gap to close is contracts/order_economics.yml,
+# under docs/change-management.md, and that is the commerce team's amendment
+# rather than a test.
+dbt/copperline_analytics/tests/commerce/tie_channel_mix_daily_channel_coverage.sql

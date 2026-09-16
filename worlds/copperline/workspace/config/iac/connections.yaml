@@ -1,0 +1,91 @@
+# Airflow connections, by conn_id. Applied by plat_config_sync.
+#
+# A password is a reference into the secret store, written `secret://<path>`.
+# A literal secret here is a defect.
+
+connections:
+  copperline_api:
+    conn_type: http
+    description: the internal fixture API the loaders and scripts/cpl page
+    host: api.copperline.internal
+    schema: http
+    port: 8873
+
+  warehouse:
+    conn_type: duckdb
+    description: the house warehouse. include/lib/warehouse.py opens it
+    extra:
+      path: include/data/copperline.duckdb
+
+  ironwood_erp:
+    conn_type: sftp
+    description: Ironwood ERP, where the GL export and the replenishment feed go
+    host: sftp.ironwood.example
+    login: copperline_out
+    password: secret://ironwood/sftp
+    port: 22
+    rotates_on: 2026-09-01
+
+  kestrel_sftp:
+    conn_type: sftp
+    description: Kestrel Outdoor's inbound share for the weekly sell-through drop
+    host: files.kestrel-outdoor.example
+    login: copperline
+    password: secret://kestrel/sftp
+    port: 22
+    rotates_on: 2026-11-14
+
+  meridian_pay:
+    conn_type: http
+    description: Meridian Pay settlements and events
+    host: api.meridianpay.example
+    schema: https
+    password: secret://meridian/api_key
+    rotates_on: 2026-05-30
+
+  halcyon_pay:
+    conn_type: http
+    description: Halcyon Payments. Frozen since the migration; kept for replays
+    host: api.halcyonpayments.example
+    schema: https
+    password: secret://halcyon/api_key
+    rotates_on: 2025-12-01
+
+  legacy_ssh:
+    conn_type: ssh
+    description: the box the Pentaho, SSIS and AutoSys estate still runs on
+    host: pdi01.copperline.internal
+    login: airflow
+    password: secret://legacy/ssh_key
+    port: 22
+    rotates_on: 2026-08-31
+
+  beacon_ads:
+    conn_type: http
+    description: Beacon Ads audience push
+    host: api.beaconads.example
+    schema: https
+    password: secret://beacon/api_key
+    rotates_on: 2027-01-19
+
+  tessera_social:
+    conn_type: http
+    description: Tessera Social audience push
+    host: api.tessera.example
+    schema: https
+    password: secret://tessera/api_key
+    rotates_on: 2027-01-19
+
+  halyard_crm:
+    conn_type: http
+    description: Halyard, the CRM and the support desk
+    host: api.halyard.example
+    schema: https
+    password: secret://halyard/api_key
+    rotates_on: 2026-10-05
+
+  compass_features:
+    conn_type: fs
+    description: where the Compass modelling team collects the feature parquet
+    extra:
+      path: exports/features

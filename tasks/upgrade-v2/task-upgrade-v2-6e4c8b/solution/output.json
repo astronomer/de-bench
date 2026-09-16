@@ -1,0 +1,4 @@
+{
+  "path": ["3.1.x", "3.2.x"],
+  "notes": "Within-major minor upgrade — no LTS bridge needed. Land directly on 3.2."
+}

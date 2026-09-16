@@ -1,0 +1,5 @@
+# kinds.py registers this team's blueprint builders and holds no DAG. The
+# blueprint loader imports it by its dotted name; letting the DAG parser import
+# it a second time under a different name registers the same kind twice and the
+# registry refuses that on purpose.
+kinds.py

@@ -1,0 +1,113 @@
+# One gap, seen from three sides, and the ticket asks for all three.
+#
+#   the contract      contracts/order_economics.yml:9 allows three channels
+#                     and marts.order_economics publishes four. The register is
+#                     dbt/copperline_analytics/models/shared/dims/dim_channel.sql,
+#                     four rows, `trade` the fourth; the order book agrees, and
+#                     dbt/.../models/shared/intermediate/_intermediate_models.yml:66
+#                     already names the same four on int_net_sales_lines.channel.
+#   the morning run   the overlay drops `accepted_values` in
+#                     plat_contracts_enforce's `check` task, so the violation
+#                     reaches neither ops.contract_violations nor the failure.
+#                     Five contracts pin a list of allowed values; the drop
+#                     silenced all five.
+#   the dbt suite     tests/commerce/tie_channel_mix_daily_channel_coverage.sql
+#                     sums the same three channels against the day's booked
+#                     total. It is the same rule, kept a second time.
+#
+# THE SUBSTANCE. Where the amendment goes is the whole of the second half of the
+# ticket. `include/lib/contracts.py` reads `accepted_values` off the COLUMN and
+# nowhere else — its `_test` ends "Any other rule ... Unknown rules pass here" —
+# so a four-value list written into the contract's `tests:` block loads, runs,
+# reports nothing, and looks like an amendment. That is the same silence the
+# ticket is complaining about, arrived at by a second route.
+#
+# NOTHING HERE HOLDS AN AUTHORED CHANNEL. The verifier reads the channel set
+# from `raw.orders` in the warehouse the scorer rebuilt from the image, and
+# checks that set against the four it grades against before it grades anything,
+# so a world that opens a fifth channel fails this loudly rather than quietly.
+#
+# WHY NOTHING RUNS THE ENFORCEMENT DAG. `marts.*` is dbt output and a trial tree
+# carries the landed half of the warehouse only, so every contract in the folder
+# would come back "the table does not exist" whatever the agent did. The
+# verifier stands the one mart up itself and drives `contracts.check`, which is
+# the function the DAG's `check` task calls.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing changed                     the verifier (the mart reports `trade`),
+#                                       the DAG file_lacks, the file_absent
+#   the mute taken out, contract left   the verifier: `trade` is still a
+#                                       violation, so the run goes red again
+#   the contract amended, mute left     the DAG file_lacks: the rule is still
+#                                       named in a file that has no other reason
+#                                       to name it
+#   accepted_values deleted from the    the verifier's still-bites test: a mart
+#   column ("no list, no violation")    publishing a typo comes back clean
+#   the list moved into `tests:`        the same test, plus the one that reads
+#                                       the list off the column
+#   a list wider than the order book    the order-book equality test
+#   the grain, a column or one of the   the surface and assertion tests
+#   three assertions dropped
+#   the mart edited to drop `trade`     do_not_modify on the two model files;
+#                                       the ticket says the mart does not move
+#   the DAG gutted or a task deleted    dag_parses, dag_structure
+#   the other four contracts' lists     the last verifier test: a fix aimed at
+#   loosened to quiet the rule          the rule rather than at this contract
+#   the tie file kept, `trade` added    file_absent. The ticket asks for a
+#   to its filter                       retirement in as many words and says not
+#                                       to move the list along one channel, so
+#                                       this is convicted on the ticket's own
+#                                       terms rather than on taste.
+#   the whole tests/commerce folder     the glob file_lacks: an empty glob fails
+#   deleted
+replay: []
+
+checks:
+
+# The morning run still loads and still has its five steps: list the folder,
+# check one contract, record the day, group by owner, fail. Deleting the failure
+# step is the cheapest way to make a red run green and it is the move the ticket
+# forbids.
+- kind: dag_parses
+  dag_id: plat_contracts_enforce
+- kind: dag_structure
+  dag_id: plat_contracts_enforce
+  task_ids:
+  - contract_names
+  - check
+  - record
+  - by_owner
+  - fail_on_violations
+
+# The rule is enforced again. Comments and docstrings are blanked before this
+# reads, so a note saying the drop was taken out is safe; what is graded is that
+# the DAG no longer names the rule in code. The shipped file names it nowhere —
+# a DAG that runs every contract in a folder has no business knowing one rule's
+# name — so this pattern only matches a rule-by-name filter, whatever it is
+# called.
+- kind: file_lacks
+  path: projects/platform/dags/plat_contracts_enforce.py
+  patterns:
+  - 'accepted_values'
+  - 'QUIET_RULES'
+
+# The second copy of the rule is out of the suite.
+- kind: file_absent
+  path: dbt/copperline_analytics/tests/commerce/tie_channel_mix_daily_channel_coverage.sql
+
+# ...and it did not move next door. The glob is the directory, so the other
+# seven ties keep it non-empty; an agent that deleted the directory to satisfy
+# the file_absent above fails here instead.
+- kind: file_lacks
+  path: dbt/copperline_analytics/tests/commerce/*.sql
+  patterns:
+  - "in\\s*\\(\\s*'store',\\s*'web',\\s*'marketplace'\\s*\\)"
+
+# The amendment itself, judged by the loader the morning run uses. Ten tests:
+# the oracle's own cross-check against the order book, the mart the contract now
+# admits, the typo it still refuses, the list read off the column, the grain and
+# the surface, the three assertions, and the four other contracts left alone.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600

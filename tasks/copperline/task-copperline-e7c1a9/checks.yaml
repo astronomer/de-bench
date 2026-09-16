@@ -1,0 +1,127 @@
+# Two faults sit on top of each other and only one of them is visible.
+#
+#   The wait names `marts.support_sla_daily`, which is the mart this DAG's own
+#   dbt selection builds and its own export publishes. The run waits for its
+#   own output: the table turns up when the run finishes and the run cannot
+#   finish until the table turns up. The step is still called
+#   `wait_for_tickets`, the file's own comment still says the day's tickets are
+#   complete by 07:00, and the rollup two steps down still reads
+#   `raw.support_tickets` — so the file says what it should have waited for.
+#
+#   The step names no `timeout`. `include/lib/blueprint/` has no house default
+#   — its own docstring and `docs/blueprints.md` both say so, the second as an
+#   open TODO — so the rendered sensor takes Airflow's seven days. That is what
+#   turns a circular wait into five months of silence: the run sits in
+#   `running`, nothing fails, and the factory's page fires on failure, so
+#   nobody is called. `max_active_runs=1` on every rendered DAG does the rest —
+#   one stuck run holds the slot, so there is one run in the history and not a
+#   hundred and sixty.
+#
+# The first fault is what the one seeded run points at. The second is what the
+# ticket asks for in its own words and what `CONVENTIONS.md` §9 requires, and
+# it is the half an agent that stops at "the pipeline works now" never reaches.
+#
+# WHY NOTHING HERE RUNS THE DAG
+# -----------------------------
+# Two measured reasons, not a preference.
+#
+#   1. The shipped warehouse holds `raw` and `ops` and nothing else — the
+#      `marts` schema is empty, measured in the world's own image. The two dbt
+#      steps behind the wait select `support_sla_daily`, which refs
+#      `fct_tickets`, and a selection of one model does not build what it reads.
+#      So the DAG cannot finish on any tree, fixed or not, and a `dag_runs`
+#      check would grade the same red on both arms. The ticket says the models
+#      are not the agent's to touch, so nobody is sent after that.
+#   2. Proving the timeout by execution costs the timeout. A sensor gives up at
+#      the first poke past its deadline, so an hour's timeout is an hour of
+#      wall clock; `DAGS_TEST_TIMEOUT` is 900s and this task's wall is 1800s.
+#      There is no date at which a correct fix and the shipped one differ in
+#      under fifteen minutes.
+#
+# So the wait is graded by asking the warehouse the question the wait asks it,
+# at the world's own clock, which is what the verifier does.
+#
+# WHAT EACH WRONG ANSWER DOES
+# ---------------------------
+#   the timeout added, the table left      the wait still asks for the DAG's own
+#   alone                                  output; two verifier tests name it —
+#                                          the circular one and the "nothing is
+#                                          landing there" one
+#   the table fixed, no timeout            the job can finish and the ticket's
+#                                          second ask is undone; the timeout
+#                                          test names Airflow's seven days
+#   `deferrable: true`, `execution_        render.py ignores a key it does not
+#   timeout:`, a misspelled `timeouts:`    know — its docstring says so — so the
+#                                          rendered sensor is unchanged. This is
+#                                          the trap the verifier exists for
+#   a default added to sensor_wait.py      do_not_modify: `include/lib/**`
+#   a timeout in the customer loader       the ticket says the DAG's own file; a
+#                                          timeout there lands on every rendered
+#                                          customer DAG
+#   the wait deleted, or swapped for a     dag_structure keeps five tasks and
+#   step that always succeeds              keeps this one a sensor
+#   the wait pointed at another table      the warehouse test: `marts` is empty
+#   that is not there                      and a missing table reads as `not yet`
+#   the day column left uncast, so the     the same test asks the whole
+#   wait compares a timestamp to a day     predicate for the last three
+#                                          mornings and gets nothing back
+#   `mode: poke` with an hours-long wait   holds a worker slot for the whole
+#                                          wait; the blueprint's own docstring
+#                                          puts poke under five minutes
+#   `notify: false` so it stops waking     the paging test: a rendered DAG pages
+#   anybody                                the team that owns it
+#   the schedule slowed down so the run    the ceiling is read from the DAG's own
+#   has more room                          cron, so a longer schedule buys no
+#                                          more timeout than its own day
+#
+# WHAT PASSES THAT IS NOT THE REFERENCE FIX, ON PURPOSE
+#   Any timeout from one poke interval up to the DAG's own day. No document in
+#   this world fixes a house default — the open TODO says nobody has agreed one
+#   — so the ticket's contract is that the wait ends inside its own day, not a
+#   particular number of seconds.
+#   The wait moved onto the tickets feed under any spelling of the day it owns:
+#   the tests read the table and the column, never the template.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# The file still renders. A YAML error here is an import error on
+# projects/customer/dags/blueprints.py, which takes the other two customer
+# blueprints down with it.
+- kind: dag_parses
+  dag_id: cus_support_sla_daily
+
+# The five steps stay, and the first one stays a sensor. Deleting the wait is
+# the cheapest way to make a stuck DAG finish and it is the one thing the
+# ticket cannot mean.
+- kind: dag_structure
+  dag_id: cus_support_sla_daily
+  task_ids:
+  - wait_for_tickets
+  - stage_tickets
+  - build_sla
+  - queue_volume
+  - publish_sla
+  operators:
+    wait_for_tickets: PythonSensor
+
+# The graded decisions, all read off the rendered operator: the step is still a
+# sensor, it does not wait for what this DAG writes, it waits for something the
+# warehouse can answer, it ends inside its own day, its mode matches the length
+# of the wait, the DAG still pages, and the fix landed in the DAG's file rather
+# than in the loader. See verifier/test_outputs.py for where each number comes
+# from — none is authored here.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600
+
+# The call site. The ticket says both halves of the fix go in this file.
+# `timeout:` is matched with a number after it, so a note about the timeout is
+# not the timeout. The table is left to the verifier, which reads the rendered
+# operator and so does not care how the key is spelled or quoted.
+- kind: file_contains
+  path: projects/customer/dags/cus_support_sla_daily.dag.yaml
+  matches:
+  - 'timeout:\s*\d+'

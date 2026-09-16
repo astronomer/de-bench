@@ -1,0 +1,97 @@
+# The ticket asks for one number in a YAML file, and the number is only
+# reachable by measuring the feed. The band that satisfies both halves of the
+# ask is narrow and neither end of it is written down anywhere:
+#
+#   pages on 2026-01-12   the second decay day landed 2,333 rows, so the
+#                         threshold is above that
+#   quiet every other day the lowest ordinary day since 13 October landed
+#                         2,597 rows, so the threshold is at or below that
+#
+# Both figures are read from `raw.web_events` in the same session; neither is
+# authored here, and neither appears in the postmortem. The postmortem gives
+# the shape of the answer — a level, not a daily band — and the two figures it
+# does print (3,100 mean, 2,510 lowest ordinary day) are counted on the event
+# clock, which is not the clock this alert can use.
+#
+# THE CLOCK IS THE HALF THAT CANNOT BE GUESSED. `raw.web_events` has no `ds`
+# column, so the subject has to name one, and only one of them shows the
+# decay. The January window was replayed on the 20th to the 22nd, so counted on
+# `event_time_utc` the four decay days now read 3,421 / 3,576 / 3,528 / 3,183 —
+# at or above a normal day. Counted on `load_time` they read 2,698 / 2,333 /
+# 1,944 / 311. An agent that tests its threshold against the incident window
+# finds this in one query; one that reads the postmortem and types a number
+# does not. The shipped freshness subject on the same table already uses
+# `load_time`, so the breadcrumb is in the file being edited.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing added, or a note and no config      the volume-subject fixture:
+#                                               the feed is still watched by
+#                                               freshness alone
+#   the default partition column left in place  the count fixture: `ds` is not
+#                                               a column on this table and the
+#                                               alert cannot run at all
+#   counted on `event_time_utc`                 the decay test: the replay put
+#                                               those four days back
+#   3,100, or 3,000, or the baseline itself     the ordinary-day test: pages on
+#                                               most of the eight months
+#   the baseline less two sigma, 2,600          the ordinary-day test: pages on
+#                                               2025-11-27, which is exactly
+#                                               what the postmortem says
+#                                               happened the last time somebody
+#                                               tightened the band
+#   1,000, or 2,000, or "> 0"                   the decay test: sleeps through
+#                                               the 12th and the 13th and only
+#                                               catches the day the feed sent
+#                                               nothing, which freshness
+#                                               already had
+#   the migration window deleted from           the quiet-window test: it
+#     `ops/calendar/quiet-days.yml` to silence  asserts the file still agrees
+#     a threshold that pages on it              the two days
+#   the whole config retuned or rewritten       the survivors test: thirteen
+#                                               shipped subjects have to
+#                                               remain
+#   the owner left off, or set to a retired     the ownership test, through
+#     team name                                 `alerts.unowned`
+#   the evaluator edited so the number does     dag_parses, dag_structure, and
+#     less work                                 the reader cross-check
+#
+# WHAT IS DELIBERATELY NOT CONVICTED. A threshold anywhere in the measured band
+# passes, including a round one: 2,500 is inside it, and an agent that arrives
+# there from the postmortem's "lowest ordinary day 2,510" has read the evidence
+# rather than guessed. The ticket asks for a number that does two things, not
+# for one number. An answer that also fills in the other subjects
+# `contracts/alert_subjects.yml` names passes too — it is more than the ticket
+# asks and it breaks nothing.
+#
+# Nothing is replayed. The alert config is a committed file and the verifier
+# evaluates it against `raw.web_events`, which the world ships landed.
+replay: []
+
+checks:
+
+# The alerting job still imports. The growth library the config is read through
+# is imported by this DAG, so a broken edit there is an import error that takes
+# the alerting run down with the config change.
+- kind: dag_parses
+  dag_id: gro_alerting_daily
+
+# The job kept its five steps: read the config, report the unowned subjects,
+# measure each one, record every evaluation, page on the breaches. An alert
+# that "passes" because the paging step is gone is not an alert, and the
+# verifier reads the config rather than the graph, so it cannot see that.
+- kind: dag_structure
+  dag_id: gro_alerting_daily
+  task_ids:
+  - watched
+  - unowned
+  - evaluate
+  - record
+  - page
+
+# The substance. See verifier/test_outputs.py: the alert replayed day by day
+# over the eight months the ticket names, graded on which days it would have
+# paged.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600

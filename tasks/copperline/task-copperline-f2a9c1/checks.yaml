@@ -1,0 +1,120 @@
+# `sc_shrink_weekly` values a counted delta at `coalesce(s.unit_cost_cents, 0)`.
+# The E8 valuation change (2026-02-01) stopped `unit_cost_cents` arriving, so
+# the coalesce turned a method change into a zero and the run stayed green:
+# rows land, `counted_delta` moves, `check_counts_posted` finds a row for every
+# location that counted, and `report_worst_locations` prints five zeros. Nothing
+# about this is planted. It is the shipped job meeting the shipped feed.
+#
+# The rule that replaces it is written down once, in `docs/inventory-policy.md`:
+# INV-1 names the two methods and the date, INV-2 puts the cost at department
+# grain, INV-3 applies the complement once per department and rounds there, and
+# INV-4 forbids restating anything that closed earlier. The ticket names none of
+# them, so finding the document is part of the work. The worked precedent is one
+# file away — `sc_inventory_snapshot_daily.build_valuation` carries the same
+# boundary and the same complement, for the position rather than for the loss.
+# Its complement join names no period, so copying it whole brings the fan-out
+# recorded in PLANTED.md's flaw inventory along with it.
+#
+# Nothing here holds an authored value. The verifier computes both methods from
+# `raw.wms_movements`, `raw.inventory_snapshots` and `raw.dept_cost_complement`
+# in the same session, on three weeks the ticket does not name: 2026-01-11
+# (closed before the change), 2026-02-15 and 2026-05-10. All three sit outside
+# the world's reserved windows.
+#
+# The one figure the ticket states is the autumn scale, "a couple of hundred
+# thousand dollars of shrink a week". Derivation: the shipped build over the
+# thirteen weeks 2025-11-02 to 2026-01-25 comes to between $170,321 and
+# $278,078 a week. It is scale only, and the graded weeks are not measured
+# against it.
+#
+# WHY NO DAG RUN. `marts.shrink_weekly` has no DDL anywhere in the tree, and
+# `AGENTS.md` ("The warehouse") says `marts.*` is derived and ships with the
+# snapshot missing. A run would also take `check_counts_posted` through
+# `warehouse.connect(read_only=True)`, which copies the whole warehouse to a
+# snapshot file. The verifier stands the mart up and calls the patched
+# `build_shrink` directly, the way `d38a7f` and `a7f3c9` do.
+#
+# THE WRONG ANSWERS, and what convicts each. Every line below was written as a
+# variant of the solution and run against the verifier before this task shipped,
+# so the right-hand column is what each one actually lost, not what it ought to.
+#
+#   nothing delivered (the coalesce left alone)   the two retail weeks, and the
+#                                                 loss test: the week reads 0
+#   the retail method applied to every week       the pre-change week: before
+#     (INV-4 ignored, closed periods restated)    2026-02-01 no row carries a
+#                                                 retail value, so it goes to 0
+#   the boundary read as the calendar year        the pre-change week, same way
+#   FY2025 unit cost carried forward per SKU      both retail weeks: 5.7 to 8.1
+#     (a cost invented for a method that has      per cent light on every row,
+#      none)                                      which is the spread INV-4 names
+#   `retail_value_cents` read as a unit price     both retail weeks, by ~800x
+#   the position valued and the delta ignored     both retail weeks, and the
+#     (the sibling DAG's shape, copied)           loss test: the sign flips
+#   the complement never applied                  both retail weeks, by 1/0.63
+#   every period effective by the count date      the May week only. February is
+#     joined and none picked                      inside FY2026-P01, so nothing
+#                                                 has fanned out yet; by May four
+#                                                 periods have and the week is 4x
+#   the graded weeks special-cased or hardcoded   the verifier runs the build
+#                                                 itself, on weeks the ticket
+#                                                 does not name
+#   the rows that cannot be valued dropped        the every-location test
+#   the counted units rescaled to make the        the counted-units test
+#     money look right
+#   the week appended rather than replaced        the rebuild test
+#   the checks or the report step deleted         dag_structure
+#   the DAG or its module broken                  dag_parses
+#
+# WHAT IS ACCEPTED, and is not a wrong answer:
+#
+#   the complement taken from the snapshot row rather than from
+#   `raw.dept_cost_complement` — the policy names both tables as sources and
+#   INV-3 calls it "the value on the row". The two drift a few basis points
+#   apart and the verifier admits either.
+#
+#   the branch written on the columns (`unit_cost_cents IS NOT NULL`) rather
+#   than on the date — the columns switch on exactly the boundary date and the
+#   dbt model `fct_inventory_valuation` already branches that way, so the two
+#   spellings give the same answer on every week.
+#
+#   a sixth column on the row. The mart has no DDL for anyone to have agreed
+#   on, so the verifier adds the column and carries on.
+#
+#   the sparse match left as it is. The ticket puts it out of scope, and a fix
+#   that widens it to the most recent snapshot on or before the count changes
+#   every figure. The ticket text is the contract.
+#
+# The build reads `raw.*` only and the mart has no producer to run first.
+replay: []
+
+checks:
+
+# The job still imports. `sc_shrink_weekly` is one file and a broken one takes
+# nothing else with it, but a fix that cannot be parsed is not a fix.
+- kind: dag_parses
+  dag_id: sc_shrink_weekly
+
+# The house shape holds: report the week, build it, check every location that
+# counted got a row, print the worst five. The two check steps are what would
+# have caught this if either had looked at the money, so a "fix" that removes
+# them to get a green run is convicted here.
+- kind: dag_structure
+  dag_id: sc_shrink_weekly
+  # An added task is not a defect: the house style is a check step per
+  # concern, and the first matrix convicted a correct fix for adding one.
+  allow_extra: true
+  task_ids:
+  - report_week_covered
+  - build_shrink
+  - check_counts_posted
+  - report_worst_locations
+  operators:
+    build_shrink: PythonOperator
+    check_counts_posted: PythonOperator
+    report_worst_locations: PythonOperator
+
+# The substance. See verifier/test_outputs.py — three weeks, the two methods,
+# the loss, the row set, the units and a rebuild.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600

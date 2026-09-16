@@ -1,0 +1,117 @@
+# The ticket is a build: one job, one table, the whole of one frozen feed. The
+# work is where the currency comes from, and the route home has two turns that
+# nothing in the ticket states.
+#
+#   1. THE DOCUMENT NAMES A TABLE NOTHING BUILDS. `docs/billing-integration.md`
+#      B-4 says the merchant account determines the currency and sends the
+#      reader to `raw.pay_merchant_accounts`, down to an open item counting its
+#      31 rows. There is no such table. `raw.merchant_regions` is what the world
+#      holds — six rows — and `stg_payments__merchant_regions` says in its own
+#      note that it is the only way to recover a Halcyon currency. An agent that
+#      takes B-4 at its word joins nothing, and one that invents the table
+#      invents its contents.
+#   2. THE REGION IS NOT THE CURRENCY. `merchant_regions` gives a market, not a
+#      currency, and three models in the dbt project carry a hand-written
+#      market-to-currency map that reads CA as CAD —
+#      `int_gl_postings_unified` (in the Halcyon branch itself),
+#      `int_orders_enriched` and `dim_geography`. The Canadian market bills USD.
+#      `raw.market_config` is where that is recorded and
+#      `docs/runbooks/market-setup.md` MKT-1 says so in as many words: the
+#      billing currency is a commercial decision and not a geographical fact,
+#      read it from the table, and no other document restates it.
+#
+# Both turns are written down in the tree and the ticket names neither. Finding
+# them is the task.
+#
+# NOTHING HERE IS AUTHORED AND NOTHING IS PLANTED. The world ships as it is; the
+# verifier recomputes every expected result from `raw.pay_halcyon_settlements`,
+# `raw.merchant_regions` and the shipped `fixtures/reference/market_config.csv`
+# in the same session. The figures in this comment are from one full-profile
+# build and are here to show the populations exist, never to be compared
+# against:
+#
+#   1,481,038  settlements in the feed, 2024-02-06 to 2025-10-03
+#     504,054  of them arrive with the currency column empty
+#      47,150  of those are pounds or euros — the rows the pre-launch reading
+#              converts at one to one
+#     152,534  of those are the Canadian account's — the rows the country
+#              reading books as CAD, three times the population above
+#   1,466,102  rows whose text amount is not a whole number of units
+#
+# THE WRONG ANSWERS, measured against a full-profile build, and what convicts
+# each:
+#
+#   the empty currency read as dollars      47,150 rows on the wrong currency.
+#     (`docs/finance-policy.md` REV-7 says   Blank-row test, and the one-currency
+#     a NULL currency is USD by              test: the GB account comes out
+#     construction — of another table)       holding both USD and GBP
+#   the region mapped to its country's      152,534 rows booked CAD. Same two
+#     currency, from any of the three        tests
+#     dbt models that hold that map
+#   the same map applied to every row,      the feed's own currency overwritten
+#     not only the blank ones                as well. Filled-row test and
+#                                            blank-row test
+#   `raw.pay_merchant_accounts` joined      the DAG raises at run. dag_runs
+#     because B-4 names it
+#   the blank rows dropped, or only the     504,054 / 976,984 / 1,077,358
+#     blank rows landed, or only the days   settlements with no row. Coverage
+#     after the international launch         test
+#   the text amount taken as a number       every amount a hundred times too
+#     (`cast(amount AS BIGINT)`)             small. Amount test
+#   the file date or the merchant-local     the settlement day wrong on most of
+#     timestamp landed as `settled_on`       the feed. Date test
+#   a fanned-out join                       one-row-per-settlement test
+#   the job named something else, or the    dag_parses
+#     tree broken
+#   nothing delivered, or a note and no job dag_runs
+#
+# TWO READINGS THAT PASS, AND SHOULD.
+#
+#   * THE CURRENCY TAKEN OFF THE ORDER. The row carries `merchant_ref`, which is
+#     the order reference, and `raw.orders` carries `currency_code`. Joined on
+#     the reference plus a date window, and with a NULL order currency read as
+#     USD the way REV-7 says, that reading agrees with the merchant account on
+#     every one of the 1,481,038 rows — measured at a seven-day window. It is
+#     more work and it reaches the same answer, so the verifier passes it. B-6
+#     is why nobody should write it: the reference is recycled and is not a key.
+#   * THE AMOUNT PARSED THROUGH A FLOAT. `cast(amount AS DOUBLE) * 100` lands
+#     the same cent on all 1,481,038 rows, because the amounts are small enough
+#     that no value falls on the wrong side of a rounding boundary. It is a
+#     defect waiting for a bigger number and `CONVENTIONS.md` rule 5 forbids it,
+#     but it produces the right table here and is not convicted for it.
+#
+#   A backfill that lands MORE than four columns is not convicted for it either:
+#   the verifier selects the columns the ticket named and ignores the rest.
+#
+# WHAT IS NOT GRADED, and why. A second run is not replayed. The ticket asks for
+# a rerun-safe write and `CONVENTIONS.md` "Writing to the warehouse" requires
+# one, but the `idempotent` check fingerprints every table in a 2.7 GB warehouse
+# twice, which costs more than the finding is worth on a job that writes one
+# table. The grain test catches a run that doubled itself; it cannot catch one
+# that would double on the second run.
+#
+# COST. One graded run. The job is a one-off over a frozen feed, so it needs no
+# configuration and no upstream, and nothing else is replayed. The build is one
+# statement over 1.48M rows and takes under a second.
+replay: []
+
+checks:
+
+# The job exists under the name the ticket gives it, and the tree still imports.
+- kind: dag_parses
+  dag_id: halcyon_currency_backfill
+
+# It runs. The ticket asks for a one-off that needs no configuration, so a plain
+# trigger has to do the whole feed — a job that only works when somebody types a
+# date into it is not a backfill. This is also what convicts a join to the table
+# B-4 names, which is not in the warehouse.
+- kind: dag_runs
+  dag_id: halcyon_currency_backfill
+
+# The substance. See verifier/test_outputs.py: the population, the grain, the
+# currency on the rows that came filled, the currency on the rows that did not,
+# the amount and the day. Every expected result is computed from the feed, the
+# region table and the shipped market file in the same session.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

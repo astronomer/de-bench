@@ -1,0 +1,31 @@
+dag_id: sc_tidal_inventory_report
+schedule: "0 8 * * 3"
+description: the one surviving Tidal inventory report, now rendered here
+default_args:
+  owner: supply
+  retries: 2
+tags: [supply, export, legacy]
+steps:
+  # `nightly_inventory_report` was a Tidal job until wave 1 moved it. What it
+  # produced was one file a week for the DC managers, and this is that file. The
+  # spreadsheet inventory `legacy/tidal/inventory_jobs.csv` still names it.
+  build:
+    blueprint: dbt_select
+    depends_on: []
+    select: inventory_position
+    vars:
+      run_date: "{{ ds }}"
+  export:
+    blueprint: partition_export
+    depends_on: [build]
+    source: marts.inventory_position
+    layer: reports
+    name: inventory_weekly
+    columns: [ds, location_id, sku, on_hand_units, demand_units]
+    order_by: [location_id, sku]
+  drop:
+    blueprint: sftp_drop
+    depends_on: [export]
+    local_path: "include/data/reports/inventory_weekly_{{ ds }}.csv"
+    remote_path: "/reports/inventory_weekly_{{ ds }}.csv"
+    conn_id: dc_reports_sftp

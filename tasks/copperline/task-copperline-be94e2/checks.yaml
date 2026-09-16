@@ -1,0 +1,145 @@
+# The break is in the data and the cause is in the artifacts, so every graded
+# fact below is traceable to one of them:
+#
+#   ops.load_control       `watermark_column` is 'loaded_at' on every row up to
+#                          2026-04-05 and NULL from 2026-04-06; `load_status`
+#                          is 'complete' to 2026-04-06 and 'failed' from
+#                          2026-04-07, for thirteen job names. The same table
+#                          carries twenty-two jobs a night to 2026-01-04 and
+#                          thirteen from 2026-01-05.
+#   legacy/pdi/trn/set_constants.ktr        takes the watermark column from
+#                          ${COPPERLINE_WATERMARK_COL}, a kettle.properties
+#                          setting on the PDI box. That is where the chain
+#                          starts, and it is one step earlier than the step the
+#                          symptom names.
+#   legacy/pdi/trn/resolve_load_control.ktr coalesces the previous night's
+#                          watermark column with that variable, which is why
+#                          the 6th still loaded and the 7th did not.
+#   projects/supply/dags/sc_pdi_history_complete.py  says in as many words that
+#                          it is a DAG of its own so a repaired night can be
+#                          closed by hand.
+#
+# Nothing here runs the legacy DAGs. They shell `ssh` to a box that is not in
+# the container, so a run-level check would grade the network. There is no
+# `unchanged` check for the same reason on the other side: the thirteen jobs
+# write nothing into this warehouse, and a warehouse file never reaches the
+# patch anyway (`**/*.duckdb` is excluded), so a differential here could not
+# fail and a check that cannot fail is worse than no check.
+#
+# What the battery convicts, by wrong answer:
+#
+#   "failing since April"                   — 1 wants both dates, and the pair
+#                                             is the find: the last night that
+#                                             loaded already had no watermark.
+#   "resolve_load_control is broken"        — 2 wants the step before it and
+#                                             the setting behind that.
+#   the watermark column guessed            — 3 wants the value the data names.
+#   "it broke at the January migration"     — 4 wants that cliff explained and
+#                                             put aside. It is the first thing
+#                                             a scan of the table finds.
+#   "the retries were masking it"           — 5 wants the innocent candidate on
+#                                             the trace path ruled out, not
+#                                             adopted.
+#   "re-run the loads and we are done"      — 6 wants the bracket closed too.
+#   the guard deleted to make it green      — dag_structure keeps all eight
+#                                             tasks, `check_control_context`
+#                                             among them.
+#   the .ktr edited to hardcode the column  — do_not_modify covers `legacy/**`,
+#                                             and `include/lib/**` with it.
+#
+# The six note checks are patterned loose on purpose: the folder's own notes
+# write dates both ways ("9 to 14 February 2026"), so each date pattern takes
+# the ISO form or the prose one. What a pattern pins is a date, a name or a
+# value, never a phrasing.
+replay: []
+
+checks:
+
+# The fix imports. Everything after this is about what it says.
+- kind: dag_parses
+  dag_id: sc_pdi_nightly_load
+
+# Eight tasks, one per step of the job plus the guard and the night's own row.
+# A fix that drops `check_control_context` makes the red go away by removing
+# the thing that says a night has no context, and the ticket says to keep it.
+# A fix that collapses the six steps into one wrapper loses the per-step retry
+# the estate is driven for.
+- kind: dag_structure
+  dag_id: sc_pdi_nightly_load
+  task_ids:
+  - set_constants
+  - resolve_load_control
+  - load_inventory
+  - load_movements
+  - load_carrier_scans
+  - load_supplier_master
+  - check_control_context
+  - record_night
+  operators:
+    set_constants: PythonOperator
+    resolve_load_control: PythonOperator
+    check_control_context: PythonOperator
+    record_night: PythonOperator
+
+# The setting is in the DAG that drives the job, spelled out. The ticket asks
+# for the value in that file in as many words, so this grades what it asked
+# for. `loaded_at` is not in the file as it ships, which is also what makes an
+# untouched tree fail.
+- kind: file_contains
+  path: projects/supply/dags/sc_pdi_nightly_load.py
+  matches:
+  - '\bloaded_at\b'
+
+# 1. When it started. Both dates, because the pair is the diagnosis: the last
+# night that loaded is 2026-04-06 and it is already the first night with no
+# watermark column on its row. An answer that names only the first red night
+# has read `load_status` and stopped.
+- kind: file_contains
+  path: ops/incidents/2026-06-15-legacy-nightly-failing.md
+  matches:
+  - '(2026-04-07|\b0?7(th)?\s+April\b|\bApril\s+0?7(th)?\b)'
+  - '(2026-04-06|\b0?6(th)?\s+April\b|\bApril\s+0?6(th)?\b)'
+
+# 2. Which step, and where it got the value. `set_constants` is one step
+# upstream of the step the symptom points at, and the setting behind it is a
+# file on a box this repository cannot reach. Both are only in the artifact.
+- kind: file_contains
+  path: ops/incidents/2026-06-15-legacy-nightly-failing.md
+  matches:
+  - 'set_constants'
+  - '(COPPERLINE_WATERMARK_COL|kettle)'
+
+# 3. The value. Every control row up to 2026-04-05 names it and nothing else
+# in the tree does.
+- kind: file_contains
+  path: ops/incidents/2026-06-15-legacy-nightly-failing.md
+  matches:
+  - '\bloaded_at\b'
+
+# 4. The other change in the table, explained and set aside. Nine jobs stop
+# writing rows on the wave 1 cutover, which is the loudest thing in
+# `ops.load_control` and has nothing to do with April.
+- kind: file_contains
+  path: ops/incidents/2026-06-15-legacy-nightly-failing.md
+  matches:
+  - '(2026-01-0[45]|\b0?[45](th)?\s+January\b|\bJanuary\s+0?[45](th)?\b)'
+  - '(migrat|wave.{0,3}(1|one)|cut.?over|moved to airflow)'
+
+# 5. The innocent candidate. Three retries five minutes apart sit on the trace
+# path and look like a masking bug; they are there for a dropped SSH session
+# and this failure is the same on every attempt. The ticket asks what was
+# ruled out, so a note that never says is not an answer.
+- kind: file_contains
+  path: ops/incidents/2026-06-15-legacy-nightly-failing.md
+  matches:
+  - '(retry|retries|retried)'
+  - '(transient|determinis|same way|every attempt|all (four|4)|neither caused|did not cause|could not have|not the cause|rule[ds]? out)'
+
+# 6. The repair. Re-running the loads leaves every repaired night marked
+# incomplete; the bracket is a DAG of its own so it can be closed for a night
+# that ran outside the schedule, and the DAG's own docstring says so.
+- kind: file_contains
+  path: ops/incidents/2026-06-15-legacy-nightly-failing.md
+  matches:
+  - 'sc_pdi_history_complete'
+  - '(re-?run|backfill|replay)'

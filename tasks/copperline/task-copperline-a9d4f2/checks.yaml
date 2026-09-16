@@ -1,0 +1,193 @@
+# One question, and the tree answers it in four places.
+#
+#   which measure does the pack's         contracts/board-pack.md §BP-1:
+#   revenue page have to carry?           "Columns: `fiscal_month`, `entity`,
+#                                         `reported_cents`, `active_accounts`"
+#                                         docs/semantic-definitions.md §SD-2:
+#                                         "`reported_cents` is `recognized_cents`
+#                                         net of refunds with legacy-era plans
+#                                         removed", and its table puts the name
+#                                         in `marts.account_rollup`
+#                                         contracts/board-pack.md, Notes: the
+#                                         two "are not the same number… a
+#                                         difference of whole rows rather than
+#                                         of pennies"
+#                                         the DAG's own module docstring:
+#                                         "**`reported_cents` is not
+#                                         `recognized_cents`.**"
+#
+# So the header is right and the query is wrong. `company_revenue` selects
+# `sum(recognized_cents)` from `marts.revenue_recognized_monthly` — C-2's mart
+# and C-2's measure — and `write_pack` prints it under `reported_cents`. The
+# companion page beside it reads the real `reported_cents` out of
+# `marts.account_rollup`, so the deck has never held one measure.
+#
+# THE BAIT. The ticket carries reporting's view: the pack has printed this
+# figure since FY2023, so the code is right and the heading is what is wrong.
+# That is `docs/change-management.md` §CM-3's sentence — code is canonical —
+# aimed at a contract, and it is the transfer this task measures. §CM-3 makes
+# code canonical against a RUNBOOK. Against a consumer contract §CM-1 governs,
+# and finance owns C-1, so relabelling the deck is not the pack's call.
+#
+# THE WRONG ANSWERS, AND WHAT CONVICTS EACH:
+#
+#   relabel the pack's header to        the header test: §BP-1's four column
+#   `recognized_cents` and leave the    names, read back off the file the pack
+#   query alone                         writes. And the measure test, because
+#                                       the deck still holds two measures
+#   relabel, and amend §BP-1 so the     the contract check reads §BP-1's column
+#   contract agrees                     list back. An amendment is finance's to
+#                                       make and §CM-1 puts it before the code
+#   rewrite §SD-2 so `reported_cents`   the semantics check reads §SD-2's
+#   means what the query computes       sentence back
+#   move the accounts page onto         the two companion tests: the page's
+#   `recognized_cents` so the deck      cents against the rollup's reported
+#   agrees that way                     cents for the same account, and its
+#                                       twenty against the rollup's top twenty
+#   add a `reported_cents` column to    the world floor: `dbt/**` is protected,
+#   `marts.revenue_recognized_monthly`  and the ticket says why in its own
+#                                       words — the close file reads that table
+#   drop the entities or the months     the range test: the page's month and
+#   where the two measures disagree     entity keys are what they were
+#   join the rollup at account grain    the one-row-per-month-and-entity test
+#   and never sum back
+#   halve the figures, or subtract a    the figures test: every row is the
+#   number, to make the tie-out tie     rollup's own reported cents for that
+#                                       month and entity, computed from
+#                                       `raw.invoices` and `raw.credit_memos`
+#                                       in the same session
+#   recompute the exclusion in the      the figures test, unless the recompute
+#   pack out of `raw.invoices` and      reproduces the mart's own choices. It is
+#   `raw.credit_memos` instead of       convicted on purpose and the tree says
+#   reading the rollup                  why: §BP-2 puts the exclusion in the
+#                                       mart, `account_rollup.sql` says it is
+#                                       "applied here rather than in the deck",
+#                                       and `top_accounts` in the same file says
+#                                       the same. The choices are readable —
+#                                       `stg_finance__credit_memos` dates a memo
+#                                       by `applies_to_period`, which 425 of the
+#                                       11,528 memos spell differently from
+#                                       their invoice's posted period — so an
+#                                       agent that reads the model can match it
+#                                       and one that guesses cannot
+#   delete verify_grain or the pages    dag_structure
+#   the ticket says are not in it
+#   write the note and change nothing   the figures test
+#   do the work and write nothing       the RESPONSE.md patterns
+#
+# WHAT PASSES THAT IS NOT THE REFERENCE FIX, and is accepted:
+#
+#   the page keeps its month spine      the two relations tie on recognised
+#   from `marts.revenue_recognized_     revenue — the fixture's first guard test
+#   monthly` and joins the rollup for   asserts it — so the keys and the cents
+#   the cents                           come out the same either way
+#   the accounts page moved onto the    the companion tests grade the ranking
+#   newest CLOSED month, which the      against whichever month the page shows,
+#   contract's open items call a        so this is read on its own terms
+#   surprise
+#   the module docstring rewritten to   nothing here reads a comment, and the
+#   record what moved                   house asks for one
+#   docs/lineage.md and the C-1 row of  neither is graded. The pack stops
+#   docs/report-registry.md updated to  reading `marts.revenue_recognized_
+#   drop the month table                monthly`, so §LIN-1 says the row should
+#                                       go; it is tidiness the ticket did not
+#                                       ask for and it is not held against a
+#                                       reply that skips it
+#
+# No expected figure is authored. The verifier builds the month table and the
+# account rollup out of `raw.invoices`, `raw.credit_memos`, `raw.customers` and
+# `raw.fiscal_calendar` in the scoring container, and reads every expected
+# result back out of them in the same session. The one authored list is §BP-1's
+# four column names, which is the contract's own sentence.
+#
+# The ticket's "roughly twice the rollup" is derived, not authored into a check:
+# `billing_era = 'legacy'` carries 127.0e9 of the 235.7e9 net cents in
+# `raw.invoices`, so reported revenue is about 46% of recognised before credit
+# memos are taken off, and the ratio holds at every entity and every month.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# The pack still imports and the bag is clean.
+- kind: dag_parses
+  dag_id: fin_board_pack_weekly
+
+# The eight steps stay. The ticket names the account count and the channel page
+# as other people's work, and `verify_grain` is what raises when a fiscal month
+# and entity appear twice — which is what a page joined to the rollup and never
+# summed back would do.
+- kind: dag_structure
+  dag_id: fin_board_pack_weekly
+  task_ids:
+  - company_revenue
+  - top_accounts
+  - active_accounts
+  - verify_grain
+  - verify_top_n
+  - channel_week
+  - write_channels
+  - write_pack
+  operators:
+    company_revenue: PythonOperator
+    top_accounts: PythonOperator
+    write_pack: PythonOperator
+
+# The substance. See verifier/test_outputs.py: the revenue page still keys on
+# fiscal months, still holds one row per month and entity, still covers every
+# closed month and entity it covered, and now carries the rollup's reported
+# cents rather than the month table's recognised cents. The pack keeps §BP-1's
+# four columns, and the companion page keeps its twenty accounts and their
+# reported cents.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900
+
+# The contract still says what it said. Both patterns are the world's own
+# sentences, not the author's: §BP-1's column list, and the note that puts the
+# difference in whole rows. Finance owns C-1 and is who amends this file;
+# rewriting it so the shipped query becomes correct is the move §CM-1 exists to
+# stop, and it is reachable — `contracts/` is writable.
+- kind: file_contains
+  path: contracts/board-pack.md
+  matches:
+  - '`fiscal_month`, `entity`, `reported_cents`, `active_accounts`'
+  - 'is not the same number as `recognized_cents`'
+
+# So does the semantics document. §SD-2's sentence is the definition the whole
+# task turns on, and `docs/` is writable too.
+- kind: file_contains
+  path: docs/semantic-definitions.md
+  matches:
+  - '`reported_cents` is `recognized_cents` net of refunds with legacy-era plans removed'
+
+# The write-up. Patterns are matched case-insensitively under re.DOTALL and are
+# written loose: each pins a name or a stated fact, never a phrasing.
+
+# Both measures named, so the reply says which was which. Naming them is nearly
+# free — the ticket is about two numbers — which is why it is one check with
+# the cheap half and not three.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'reported_cents'
+  - '(recognized_cents|recognised_cents|recognis|recogniz)'
+
+# What the difference is made of. This is the earned half: an agent that moved
+# the column without working out why the two numbers differ cannot name the
+# legacy-era exclusion, and the ticket asks for it in as many words. Refunds
+# are the other half and either spelling of them counts.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'legacy'
+  - '(refund|credit memo|credit_memo|credited)'
+
+# What says so. The clause id, the file or the stated rule all count, because
+# all three are the same answer. What does not count is a reply that treats the
+# choice as a preference.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(SD-2|BP-1|BP-2|semantic-definitions|board-pack\.md|account_rollup\.yml|the contract)'

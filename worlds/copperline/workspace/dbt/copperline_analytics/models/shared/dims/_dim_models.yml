@@ -1,0 +1,115 @@
+# Tests on the conformed dimensions.
+#
+# Every dimension is keyed and every key is unique. A dimension whose key is not
+# unique fans out every fact that joins it, and the fan-out is silent.
+
+version: 2
+
+models:
+
+  - name: dim_date
+    columns:
+      - name: date_key
+        tests: [unique, not_null]
+      - name: fiscal_month
+        tests: [not_null]
+      - name: comp_date_ly
+        description: >
+          The comparable day a year back, off the calendar. Never ds - 364.
+          Empty for the first fiscal year, which has no year before it.
+
+  - name: dim_store
+    columns:
+      - name: store_key
+        tests: [unique, not_null]
+      - name: market_code
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_geography')
+              field: market_code
+      - name: first_comp_date
+        description: >
+          Thirteen full fiscal months from the opening, or from the acquisition
+          close for an acquired store.
+        tests: [not_null]
+      - name: comp_clock_starts_at
+        tests:
+          - accepted_values:
+              values: ['store opening', 'acquisition close']
+
+  - name: dim_warehouse
+    columns:
+      - name: warehouse_key
+        tests: [unique, not_null]
+      - name: location_kind
+        tests:
+          - accepted_values:
+              values: ['dc', 'hub', 'returns', 'store']
+
+  - name: dim_supplier
+    columns:
+      - name: supplier_key
+        tests: [unique, not_null]
+      - name: sku_count
+        tests: [not_null]
+
+  - name: dim_channel
+    columns:
+      - name: channel_key
+        tests: [unique, not_null]
+      - name: channel_kind
+        tests:
+          - accepted_values:
+              values: ['physical', 'digital', 'account']
+
+  - name: dim_promotion
+    columns:
+      - name: promotion_key
+        tests: [unique, not_null]
+      - name: promo_type
+        tests: [not_null]
+
+  - name: dim_carrier
+    columns:
+      - name: carrier_key
+        tests: [unique, not_null]
+      - name: service_family
+        tests:
+          - accepted_values:
+              values: ['express', 'ground', 'freight']
+
+  - name: dim_geography
+    columns:
+      - name: geography_key
+        tests: [unique, not_null]
+      - name: currency_code
+        tests: [not_null]
+      - name: entity_code
+        tests: [not_null]
+
+  - name: dim_account
+    columns:
+      - name: account_key
+        tests: [unique, not_null]
+      - name: account_type
+        tests:
+          - accepted_values:
+              values: ['asset', 'liability', 'revenue']
+      - name: sign_for_reporting
+        tests:
+          - accepted_values:
+              values: [1, -1]
+              quote: false
+
+  - name: dim_cost_center
+    columns:
+      - name: cost_center_key
+        tests: [unique, not_null]
+
+  - name: dim_currency
+    columns:
+      - name: currency_key
+        tests: [unique, not_null]
+      - name: fx_rate_ppm_as_of
+        tests: [not_null]

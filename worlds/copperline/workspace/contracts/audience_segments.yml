@@ -1,0 +1,15 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/audience-sync.md
+model: marts.audience_segments
+consumer: C-6
+owner: growth
+grain: [ds, segment_id, customer_id]
+columns:
+  - {name: ds, type: date, required: true}
+  - {name: segment_id, type: string, required: true}
+  - {name: customer_id, type: string, required: true}
+  - {name: contact_hash, type: string, required: true}
+  - {name: consent_state, type: string, required: true, accepted_values: [granted, withdrawn]}
+tests:
+  - unique: [ds, segment_id, customer_id]
+  - not_null: [ds, segment_id, customer_id, contact_hash, consent_state]
+  - row_count_min: 1

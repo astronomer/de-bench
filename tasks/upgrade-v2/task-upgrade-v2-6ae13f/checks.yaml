@@ -1,0 +1,5 @@
+checks:
+- kind: scoring_primitive
+  name: tz_aware_start_date
+- kind: scoring_primitive
+  name: structural_match_taskids

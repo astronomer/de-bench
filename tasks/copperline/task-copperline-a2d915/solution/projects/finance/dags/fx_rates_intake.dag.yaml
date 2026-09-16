@@ -1,0 +1,77 @@
+# The daily rate file, landed before anything that converts.
+#
+# §REV-7: a line in a currency other than the entity's functional currency
+# converts at the INVOICE-DATE rate, once, at line level, before the daily
+# allocation. Not the recognition-date rate, not the month-end rate, not an
+# average. So the rate for a day has to be on the table before that day's
+# invoices are read, which is why this runs at 05:00 and the recognition
+# models run later.
+#
+# The rate is held as integer parts per million on the row, quoted into USD.
+# The base currency is not a column and never was: the file quotes one way,
+# there is no USD row on the table, and `stg_reference__fx_rates` mints USD at
+# 1,000,000 so that a converting model can join a rate rather than branch on
+# the base.
+
+dag_id: fin_fx_rates_intake
+schedule: "0 5 * * *"
+description: land the daily FX rate file
+tags: [finance, fx, intake]
+
+default_args:
+  owner: finance
+  retries: 2
+
+steps:
+  wait_for_file:
+    blueprint: sensor_wait
+    file: "landing/fx/dt={{ macros.ds_add(ds, -1) }}/rates.csv"
+    poke_interval: 300
+    timeout: 10800
+    mode: reschedule
+
+  land:
+    blueprint: csv_intake
+    depends_on: [wait_for_file]
+    source: "landing/fx/dt={{ macros.ds_add(ds, -1) }}/rates.csv"
+    table: raw.fx_rates
+    # Both arguments together. Replace on its own falls back to append, and a
+    # rate file landed twice puts two rates on one day.
+    mode: replace
+    partition_col: rate_date
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    # The five fields Ironwood sends, which are the five columns the table
+    # carries. `columns` types the read, and the read has to name what is in
+    # the file — a name the file does not carry is a load that never runs.
+    columns:
+      rate_date: DATE
+      currency_code: VARCHAR
+      rate_to_usd_ppm: BIGINT
+      source: VARCHAR
+      published_at: TIMESTAMP
+
+  coverage:
+    blueprint: rollup
+    depends_on: [land]
+    source: raw.fx_rates
+    partition_col: rate_date
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    # One row a morning, per feed: how many currencies that day's file
+    # brought. Grouping on the feed keeps the count on one row, which is what
+    # `currency_count` has to mean for anybody reading the table to see the
+    # morning arrived whole.
+    group_by: [source]
+    agg: count_distinct
+    column: currency_code
+    as: currency_count
+    target: ops.fx_rate_coverage
+
+  publish:
+    blueprint: partition_export
+    depends_on: [land]
+    source: raw.fx_rates
+    layer: ops
+    name: fx_rates
+    partition_col: rate_date
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [currency_code]

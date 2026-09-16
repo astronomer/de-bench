@@ -1,0 +1,65 @@
+# The ticket asks for four rows in a three-column file, and every one of the
+# eight new cells is a fact the business already wrote down. The trap is that
+# five of the eight are not what a reader assumes:
+#
+#   BR  USD  CL-US    cross-border merchant of record, no local entity
+#   ID  USD  CL-US    the same arrangement
+#   PL  EUR  CL-IE    launched under the Irish entity on EU VAT OSS
+#   MX  MXN  CL-MX    the one row that matches the assumption
+#
+# The breadcrumb is CA, which has been in both lists since 2014 and bills USD
+# under CL-US. It is not part of the ask, and it says the table is telling the
+# truth before the agent has to trust it for a market it cannot check.
+# `docs/runbooks/market-setup.md` MKT-1 names the table the record and says no
+# document restates it.
+#
+# What each wrong answer does:
+#
+#   BR as BRL, PL as PLN, ID as IDR      typed from world knowledge; fails the
+#                                        attributes test, whole currencies out
+#   entities CL-BR, CL-PL, CL-ID         invented; `raw.entities` holds five
+#   CA "corrected" to CAD                the breadcrumb read as a bug
+#   only some of the four added          fails the market-set test
+#   the seed edited, the job left alone  Monday puts the five back; fails the
+#                                        rebuild test, and nothing else notices
+#   the job edited, the seed left alone  fails the market-set test: the repo is
+#                                        what the models build from today
+#   the job gutted or rewritten          fails dag_parses or dag_structure
+#
+# No expected value is authored. The verifier reads every currency and entity
+# from `raw.market_config` in the warehouse the scorer rebuilds from the image,
+# so an agent that edits the tree cannot move the answer. It authors one thing —
+# which market codes belong in the seed — and cross-checks that against the
+# config table in its first test, so a world that opens a tenth market fails
+# this task loudly instead of grading a stale list.
+#
+# The seed is a committed file and the DAG only writes it, so nothing needs
+# replaying first.
+replay: []
+
+checks:
+
+# The weekly job still renders. A YAML error here is an import error on
+# projects/growth/dags/blueprints.py, which takes six growth DAGs down with it.
+- kind: dag_parses
+  dag_id: gro_market_seed_build
+
+# The job kept its four steps: wait for the export, write the seed, load it,
+# rebuild what reads it. Deleting the sensor or the load makes the seed a file
+# nobody maintains, which is the state the ticket is complaining about.
+- kind: dag_structure
+  dag_id: gro_market_seed_build
+  task_ids:
+  - wait_for_config
+  - write_seed
+  - load_seed
+  - rebuild_dependents
+  operators:
+    write_seed: PythonOperator
+
+# The five graded decisions: the market set, the attributes on every row, the
+# header, and that the Monday rebuild reproduces the file — plus the oracle's
+# own check that the world still agrees with the set it expects.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600

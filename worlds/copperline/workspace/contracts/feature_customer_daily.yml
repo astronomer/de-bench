@@ -1,0 +1,19 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/feature-store.md
+model: marts.feature_customer_daily
+consumer: C-9
+owner: customer
+grain: [ds, customer_id]
+partition_by: ds
+columns:
+  - {name: ds, type: date, required: true}
+  - {name: customer_id, type: string, required: true}
+  - {name: region_as_of, type: string, required: true}
+  - {name: status_as_of, type: string, required: true}
+  - {name: orders_7d, type: integer, required: true}
+  - {name: orders_30d, type: integer, required: true}
+  - {name: orders_90d, type: integer, required: true}
+  - {name: net_sales_cents, type: bigint, required: true}
+tests:
+  - unique: [ds, customer_id]
+  - not_null: [ds, customer_id, region_as_of, status_as_of]
+  - no_floats_in: [net_sales_cents]

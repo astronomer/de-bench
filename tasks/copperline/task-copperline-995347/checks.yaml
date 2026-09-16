@@ -1,0 +1,208 @@
+# The defect is one line of
+# `dbt/copperline_analytics/models/customer/feature_customer_daily.sql`:
+#
+#     coalesce(sum(o.net_sales_cents) filter (where o.order_date <= s.ds), 0)
+#
+# `o` is `int_orders_enriched` and `net_sales_cents` there is gross less REV-13
+# discounts less EVERY return ever matched to the order, whenever the customer
+# asked for it. `docs/semantic-definitions.md` defines it that way on purpose
+# and four teams read it that way. Summing it into a row dated before the
+# customer asked puts a refund into a feature that could not have been known on
+# the row's date — which is `contracts/feature-store.md` §FS-1, and the only
+# thing this table exists to avoid. The world ships it that way; nothing here
+# is planted.
+#
+# It is silent by construction. The grain holds, `check_contract` passes, and
+# `tie_feature_table_has_no_future` guards the ORDER date and only the order
+# date, so it stays green over rows whose money knows the future. The model's
+# own docstring claims the table is "point-in-time by construction ... with no
+# column that could only be known later", which is the claim the ticket
+# disproves.
+#
+# WHY IT ONLY SHOWS ON A REBUILD. The mart is a table with a fifteen-day spine
+# and `cus_features_daily` writes one parquet a run, the morning after the day
+# it covers, so a shipped file carries at most a few hours of returns it should
+# not. Re-running that day now nets against everything that has arrived since.
+# Return lag on the orders that name an account runs to a median of 14 days, a
+# 90th of 38 and a maximum of 60, measured on `raw.returns` against
+# `raw.orders`, so a day rebuilt today is off by weeks. The modelling team
+# rebuilt eighteen months of
+# it into a training set, which is why the model scored beautifully offline and
+# did nothing live.
+#
+# THE FIGURE IN THE TICKET. "A few dozen accounts" is measured on the shipped
+# world: accounts with an order in the thirty days to `ds` carrying a return
+# initiated after `ds` number 33 to 49 a day across the five graded days, and 40
+# to 57 a day on the running column's wider window. The ticket names no count,
+# no cent and no date.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier computes the counts and
+# `booked_cents_30d` from `raw.orders` in the same session, with the two filters
+# staging applies, and the money from `int.int_net_sales_lines` (the line's
+# discounted value, a largest-remainder allocation nobody should copy to grade
+# a date bound) and `stg.stg_sales__returns` (the refund and the day the
+# customer asked). Both live under `dbt/copperline_analytics/models/shared/`,
+# which `do_not_modify` holds shut, so no answer can move what it is measured
+# against.
+#
+# WHY DBT RUNS, AND WHY THERE IS NO PREPARE STEP. The world ships the landed
+# half of the warehouse only (`AGENTS.md`, "The warehouse"), so the mart does
+# not exist until dbt has made it. The verifier builds the leaf and its
+# upstream itself — twenty models, about fifteen seconds — and then rebuilds
+# the leaf once per run date. It is not a `prepare:` command, because a prepare
+# failure is tolerated: the first combined run of this task lost its build to
+# container pressure, the step was tolerated, and every test then graded
+# relations that were never made. A starved build is a build failure and has to
+# read as one. The verifier retries it, the later goes on the profile's larger
+# `memory_limit`, and reports dbt's own words if it still will not go.
+#
+# No DAG replays: `cus_features_daily`'s own steps read `marts.dim_customer`
+# for columns the dbt dimension does not carry, so the DAG cannot run in this
+# world and the ticket is not about the DAG.
+#
+# THE FIVE GRADED DAYS, and none of them in the ticket:
+#
+#   built at 2026-05-12   graded on 2026-05-12, 2026-05-04, 2026-04-28
+#   built at 2026-03-04   graded on 2026-03-04, 2026-02-22
+#
+# Three of the five are days the run did not run on. That is the sharpest edge
+# here: a fix that bounds the refunds at `{{ ds() }}` — the run's date — gets
+# the top row of the spine right and every row under it wrong. The second run
+# date is ten weeks earlier and says the fix is not cut to a window. All five
+# sit outside the reserved windows (2026-06-01..09 and 2025-08-31..2025-10-04)
+# and outside the never-grade tail (2026-06-10..14).
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no model change   verifier: the five money
+#                                                      tests
+#   the refunds bounded at the run's date rather       verifier: 2026-05-04,
+#     than the row's                                   2026-04-28, 2026-02-22
+#   the refunds bounded on `received_date`             verifier: money. 139,122
+#                                                      of the world's 154,341
+#                                                      returns are received on a
+#                                                      different day from the
+#                                                      one they were asked on,
+#                                                      and 38 to 49 accounts a
+#                                                      graded day move on it
+#   the netting dropped, so the column becomes gross   verifier: money
+#   `returned_cents` added back whole                  verifier: money
+#   an order-grain rebuild that takes                  verifier: money. That
+#     `int_orders_enriched.discount_cents` for the     column is the line
+#     line's discounted value                          promotion plus the
+#                                                      allocated header
+#                                                      discount, and the line
+#                                                      promotion is already
+#                                                      inside `gross_line_cents`
+#   the running column left leaking, only the          verifier: money grades
+#     thirty-day one fixed                             both columns
+#   the running column's window narrowed to ninety     verifier: money. The
+#     days to agree with `projects/customer/lib/       ticket says no window
+#     features.py`                                     moves
+#   the line grain not collapsed back                  verifier: the grain test
+#   the accounts that moved dropped, or the model      verifier: the population
+#     filtered to the ones that look right             test, then money
+#   `orders_30d` or `booked_cents_30d` netted too      verifier: the counts test
+#   the date bound put inside `int_net_sales_lines`    do_not_modify: that is
+#     or `stg_sales__returns`                          four teams' number, not
+#                                                      this table's
+#   the model made to build only the run's own day     verifier: the fixture
+#                                                      reads days of the spine
+#                                                      the run did not run on
+#                                                      and says the day is
+#                                                      missing
+#   the tie test or the schema tests deleted           nothing here reads them,
+#                                                      and deleting them wins
+#                                                      nothing: they were green
+#                                                      over the defect
+#   "the numbers moved because the data moved"         file_contains: the second
+#                                                      line wants the columns
+#                                                      that did not move
+#   "just use the files we kept"                       file_contains: the third
+#                                                      line wants why they are
+#                                                      the better copies
+#
+# DEFENSIBLE ALTERNATIVES THAT PASS, and should:
+#
+#   * The bound taken off `int_net_sales_lines.first_return_date` or
+#     `last_return_date` rather than off `stg_sales__returns`. No line in this
+#     world carries two returns at all, let alone two on different dates — 0 of
+#     the 154,341 measured — so the two land the same figures. It is a thinner
+#     reading and it is not wrong here. Run and measured.
+#   * `source_id_shape = 'current'` dropped as well, so the acquired book gets
+#     rows. The ticket puts it out of scope and an answer that leaves it alone
+#     is right; an answer that also fixes it is not convicted, because the
+#     population test asks for a superset and no Northwave account has an order
+#     in `raw.orders` for the money tests to grade.
+#   * Any shape at all: a `lines` CTE, a second model under
+#     `models/customer/`, a window function. Nothing here reads the model's
+#     structure, only the rows it lands.
+#   * A wider table. The verifier selects the five graded columns by name and
+#     ignores the rest.
+#   * The cap against the line dropped — `discounted_line - refunds` with no
+#     `least`. A refund carries the tax back and can exceed the tax-exclusive
+#     line, and `int_net_sales_lines` caps it for that reason, but no line
+#     inside the five graded windows has a refund larger than the line it came
+#     off (measured: 0 of them), so the uncapped rebuild lands the same figures.
+#     It is thinner than the world's own rule and it is not convicted here.
+#   * An order-grain rebuild that reaches the same discounted value —
+#     `gross_line_cents` less the order's own header discount — and takes the
+#     dated refunds off that. It is the same arithmetic without the line grain
+#     and, absent the cap, the same answer.
+
+replay: []
+
+checks:
+
+# The substance: both net-sales columns against the returns the customer had
+# actually asked for, the three columns the ticket says do not move, the
+# population and the grain — on five days across two run dates. The verifier
+# stands the warehouse up itself, from raw; see verifier/test_outputs.py and
+# the note above on why no prepare step does it. The timeout is headroom for
+# the retries, not the measured cost: a healthy run is about a minute.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 1200
+
+# The three lines the modelling team asked for. Patterns are matched
+# case-insensitively with re.search and are written loose on purpose: each pins
+# a named thing or a direction, never a phrasing, and a table row satisfies them
+# as readily as a sentence.
+
+# Line one: what the row was carrying. Naming returns is not enough on its own —
+# the model names them too, through a column whose definition includes them — so
+# the second pattern wants the timing, which is the whole of the finding.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(refund|return|credit note|\brma\b)'
+  - '(had ?n.?t (yet )?(happened|been|arrived|asked|occurred)|not yet (happened|asked|arrived|known|initiated)|after (the|that|its own|the row.s) (row|day|date|ds)|initiated after|arrived after|in the future|from the future|later return|returns? (that|which) (came|arrived|happened|were initiated) later|since the (day|run)|had not happened)'
+
+# Line two: which other column carries the same thing, and which do not. The
+# bare `net_sales_cents` is the other one — the word boundary keeps
+# `net_sales_cents_30d` from satisfying it — and the counts and the booked money
+# are the ones that were already right.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\bnet_sales_cents\b'
+  - '(booked_cents|orders_7d|orders_30d|orders_90d|the counts?|order counts?)'
+
+# Line three: what the kept files are worth and whether rebuilding helps. The
+# answer is the one that reads backwards: a file written the morning after its
+# day carries almost none of the leak, and rebuilding it now is what puts the
+# leak in. A reply that says "re-run the history and it will be right" has it
+# the wrong way round.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((old|original|kept|existing|previous|earlier|on.disk|already)[^\n]{0,60}(file|parquet|export|cop(y|ies))|files? (already )?on disk|written (at the time|on the day|the (next|following) (morning|day)))'
+  # The flipped polarity joined after a trace audit: "a rebuild is only ever
+  # lower" and "the days the retrain rebuilt do not hold what was true" state
+  # the same finding from the other side.
+  # The bare "did not"/"do not" alternates were withdrawn: "rebuilding did not
+  # change anything, so the retrain was safe" is the opposite finding and
+  # matched them. A negation only counts bound to a verb that carries the
+  # claim, and the bare "wrong" in the reverse arm went the same way —
+  # "nothing is wrong ... rebuilt" matched it.
+  - '((re-?built?|re-?run|re-?ran|rebuild|backfill|regenerat)[^\n]{0,120}(worse|leak|does ?n.?t help|doesn.t help|no help|not help|would ?n.?t help|wrong|reintroduc|same problem|adds?|pulls? in|brings? in|nets? in|only ever lower|understate|(do|does|did|would|will|can)\s?n.?t\s+(help|fix|match|agree|hold|carry|reproduce|recover|give|return|know))|(worse|leaks?|leaking|leaked)[^\n]{0,120}(re-?built?|re-?run|rebuild|backfill|regenerat))'

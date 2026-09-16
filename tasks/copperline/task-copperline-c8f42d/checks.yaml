@@ -1,0 +1,161 @@
+# The whole ticket is one question: which day does a return belong to, and how
+# far back does a night's delivery reach?
+#
+# A return authorisation is raised between three and sixty days after the order
+# it came off — 80% of them inside three weeks, the rest over the two months
+# after. The ticket puts the row on the order's day, so a single night names
+# order days spread over two months and every one of them has already been
+# published. `docs/late-data-policy.md` LD-1 asks for the measured reach of the
+# source and says not to copy a window from another job; LD-2 says to rebuild
+# the day rather than append to it. Taking the days off the night's own rows
+# needs no window at all, and is what the ticket asks for.
+#
+# The trap under it is the join. `order_line_id` is a line ordinal — twelve
+# distinct values over nine million lines — and the staging layer says so
+# twice, on the source in `_sources.yml` and again on `stg_sales__returns`.
+# Four statements in `projects/commerce/sql/` join on it anyway
+# (`close_line_economics`, `close_apply_promotions`, `economics_lines`,
+# `returns_orphan_check`), which is why the ticket's own first paragraph says
+# the close's `net_sales_cents` reads negative. Copying the house SQL is the
+# wrong move here and reading the staging layer is the right one.
+#
+# The third thing to get right is the population. `NOT is_test` is unanimous in
+# the tree — `enrich_base`, `economics_tie`, `close_revenue_tie`,
+# `channel_load_market` and `stg_sales__orders` all take it that way — so the
+# ticket does not state it and finding it is part of the work. It moves 39 of
+# the 64 graded days.
+#
+# The soft deletes ARE stated, and they are stated because the tree disagrees
+# with itself about them: `enrich_base` keeps them and cites
+# `docs/reconciliation-policy.md` R-6, and the dbt view `stg_sales__orders`
+# drops them in the same breath as the test rows. An agent that reads the
+# staging layer and an agent that reads commerce's own SQL would land on
+# opposite answers on 20 of the 64 days, and neither would deserve to lose. So
+# the ticket names R-6 and the disagreement is left as furniture.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.returns`, `raw.orders` and `raw.order_lines` in the same
+# session, and works out the graded days from the nights it replays. Its first
+# test proves the graded span can still tell the answers apart.
+#
+# WHY NOTHING RUNS THE DAG. The subject is what a run of nights leaves behind.
+# Seven scheduler runs to grade one query buys nothing the direct call does
+# not, and it costs a scheduler. The verifier calls
+# `returns_netting.net_delivery(ds)` itself, night after night in order, which
+# also removes the shortcut: a day typed into the table by hand is a day the
+# replay replaces before anything reads it.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered                       verifier: the import fails
+#   the line joined on `order_line_id`      verifier: the replay test.
+#     alone, the way four commerce           `returned_line_cents` becomes
+#     statements do                          every order that ever had a line
+#                                            in that position. Measured: the
+#                                            join fans a day's authorisations
+#                                            across nine million lines, so it
+#                                            may exhaust the check's clock
+#                                            rather than return a wrong number
+#   the row put on the day the               verifier: the replay test. Every
+#     authorisation was raised —             graded day holds the wrong
+#     what `returns_publish.sql` does        authorisations
+#   the row put on the day the goods         verifier: the replay test, the
+#     came back                              same way
+#   a fixed thirty-day lookback over         verifier: the replay test. Half
+#     the order days                         the graded days are never written
+#   a fixed lookback of any width under      verifier: the replay test, the
+#     sixty days                             same way
+#   no lookback: only the night's own        verifier: the replay test. Sixty
+#     date written                           of the sixty-four graded days are
+#                                            never written at all
+#   the staff transactions left in           verifier: the replay test. 39 of
+#                                            the 64 graded days move
+#   the soft-deleted orders dropped, the     verifier: the replay test. 20 of
+#     way the dbt staging view drops them     the 64 graded days move. The
+#                                            ticket states R-6 for exactly this
+#                                            reason — see the note above
+#   `card_refund_cents` summing every        verifier: the replay test. Every
+#     refund method                          graded day moves
+#   `open_rmas` read as a receipt in the     verifier: the replay test. No
+#     future rather than no receipt          authorisation against a graded day
+#                                            has a receipt after `WORLD_TODAY`
+#                                            — the 961 that do sit on order
+#                                            days from 2026-04-08 on — so the
+#                                            column comes out zero on all 64
+#   the day rebuilt from tonight's own       verifier: the replay test. A day
+#     authorisations alone                   revisited is left holding the
+#                                            handful raised that night.
+#                                            `include/lib/warehouse.py` names
+#                                            this one: a partition write takes
+#                                            the whole partition
+#   the rows appended rather than the        verifier: the replay test and the
+#     day replaced                           re-run test — the day carries two
+#                                            rows
+#   the whole feed rebuilt every night       verifier: the untouched-day test.
+#                                            The ticket forbids it and
+#                                            `projects/platform/README.md`
+#                                            says why
+#   days corrected by hand in the table      verifier: it runs the nights
+#                                            itself first
+#   the DAG or the module broken             dag_parses
+#   the two steps collapsed into one         dag_structure
+#
+# WHAT IS NOT CONVICTED, on purpose:
+#
+#   * A build that carries extra columns beyond the seven the ticket lists. The
+#     verifier selects the seven by name, and plants its untouched-day row by
+#     copying one the build wrote, so a wider table is planted into as happily
+#     as a narrow one.
+#   * A rebuild window WIDER than the feed's own reach — sixty days, or ninety.
+#     It is waste and LD-1 says so, but it loses nothing: every day it touches
+#     it rebuilds whole and correctly. Only a window narrower than sixty days
+#     is convicted, and only through the days it never writes.
+#   * What `net_delivery` returns. The ticket asks for the number of order days
+#     rewritten; nothing here reads the return value, because a build that
+#     counts days one way and writes them another is still a build that wrote
+#     the right rows.
+#   * Whether `tie_days` runs at all. `dag_structure` requires the step, and
+#     the ticket says what it is for; nothing here executes it.
+#   * Which day the DAG hands to `net_delivery`. `CONVENTIONS.md` holds a daily
+#     job back one day and the solution does, but a run that takes `{{ ds }}`
+#     is loading the same table by the same rule, and nothing here looks at
+#     `op_kwargs`.
+#   * Extra steps in the DAG. `dag_structure` names the two the ticket asks
+#     for; a sensor in front of them is a reasonable thing to add.
+#   * A build that writes a staging table of its own on the way, or publishes
+#     the day as a partition file beside the table. Nothing here looks at
+#     either.
+#   * Days with no returns at all. A day named by a night always carries at
+#     least one authorisation, so nothing here decides whether an empty day
+#     gets a row of zeros.
+#
+# The nights replayed are 2026-03-20 to 2026-03-26 and the order days they name
+# run 2026-01-19 to 2026-03-23. The ticket names none of them and no date at
+# all. The span sits outside both reserved ranges, outside the 2025 processor
+# overlap quarter and outside FY2026-P04, which the close task grades.
+replay: []
+
+checks:
+
+# The new DAG renders and the bag still has no import errors.
+- kind: dag_parses
+  dag_id: returns_netting_daily
+
+# The two steps the ticket asks for, as operators. `tie_days` exists to make a
+# short night loud in the DAG's own log rather than in a merchandising meeting
+# a month later; folding it into the load removes the only thing that would
+# catch a missed day at all.
+- kind: dag_structure
+  dag_id: returns_netting_daily
+  task_ids:
+  - net_delivery
+  - tie_days
+  operators:
+    net_delivery: PythonOperator
+    tie_days: PythonOperator
+
+# The substance. See verifier/test_outputs.py — seven nights in order, the
+# sixty-four order days they name, a re-run, and a day no night reached.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

@@ -1,0 +1,150 @@
+# Two files hold a list of the rendered reports, and only one of them can be
+# written by hand. `config/reports.yml` is the source: `fin_report_publish`
+# reads it at parse and builds three tasks per entry, and
+# `plat_report_registry_sync` writes the whole of `ops/report_registry.yml` from
+# it every morning at 11:00. The overlay ships that rendered file as the sync
+# last left it, so the agent finds the second surface the ticket names and can
+# edit it. The ticket's own story says that hand edit was made twice and lost
+# twice.
+#
+# The grading is a sequence, and the order the scorer runs its stages in is what
+# makes it mean anything: the parse stage reads both DAGs, the execute stage
+# runs the sync, and only then does the output stage read
+# `ops/report_registry.yml`. So every file check below reads the file AFTER the
+# 11:00 sync has rewritten it. An entry that is only in the rendered file is
+# gone by the time it is read, exactly as it was for Priya.
+#
+# 2026-06-12 is the graded date. The sync reads a committed file and writes a
+# committed file — it touches no fixture and no warehouse table — so the date
+# carries no data and only has to sit after the DAG's start date.
+#
+# Nothing here holds an authored value. Every string is either in the ticket
+# (the report's name, the mart it reads), in the mart's own model
+# (`seller_id`, `order_count`, `gmv_cents`, `commission_cents` in
+# `dbt/copperline_analytics/models/commerce/gmv_daily.sql`), or in the tree as
+# it shipped (the four reports that must survive).
+#
+# There is no `unchanged` check. This ticket moves no rows: no DAG under it
+# writes a warehouse relation, so a differential over the untouched tree would
+# compare two empty sets and cost a second container to do it. What must not
+# move here is files and DAG shape, and the exact task-id set on the publisher
+# plus the four surviving registry entries are what hold that line.
+#
+# The wrong answers, and what convicts each:
+#
+#   Edit `ops/report_registry.yml` and stop — what the ticket says was already
+#     tried twice. The graded sync run rewrites the file from
+#     `config/reports.yml` and the entry goes; the registry checks fail, and the
+#     publisher never gained its three tasks either, so the structure check
+#     fails with them.
+#   Make the sync merge instead of replace, and keep the hand edit. The registry
+#     checks then pass and the publisher check still fails — the report cannot
+#     publish from a file the publisher does not read. The file_lacks check
+#     names the mechanism directly: the sync must not read its own output.
+#   Delete or disable the sync so the hand edit survives the night. The parse
+#     and structure checks on `plat_report_registry_sync` fail.
+#   Declare the report and tidy the source on the way past — drop one of the
+#     four, rename one, point one at another mart. The exact task-id set and the
+#     four survivor patterns fail.
+#   Write the export file by hand under `exports/reports/`. Nothing reaches
+#     either list; every check that names the new report fails.
+#
+# The sync has no upstream and reads no table, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# `fin_report_publish` reads `config/reports.yml` at import and builds its graph
+# from it, so a malformed entry does not fail one report — it takes the whole
+# DagBag down.
+- kind: dag_parses
+  dag_id: fin_report_publish
+
+- kind: dag_parses
+  dag_id: plat_report_registry_sync
+
+# Three tasks per report, five reports. The exact set is the point twice over:
+# the three new ids can only exist if the entry reached `config/reports.yml`,
+# and the twelve old ones can only survive if the other four were left alone.
+- kind: dag_structure
+  dag_id: fin_report_publish
+  task_ids:
+  - extract_account_rollup_monthly
+  - render_account_rollup_monthly
+  - check_account_rollup_monthly
+  - extract_comp_sales_weekly
+  - render_comp_sales_weekly
+  - check_comp_sales_weekly
+  - extract_marketplace_daily_summary
+  - render_marketplace_daily_summary
+  - check_marketplace_daily_summary
+  - extract_monthly_revenue_by_entity
+  - render_monthly_revenue_by_entity
+  - check_monthly_revenue_by_entity
+  - extract_revenue_daily_summary
+  - render_revenue_daily_summary
+  - check_revenue_daily_summary
+
+# The sync keeps its three steps. Gutting the write step is the other way to
+# make a hand-edited registry survive.
+- kind: dag_structure
+  dag_id: plat_report_registry_sync
+  task_ids:
+  - read_config
+  - render
+  - write
+
+# The sync must not start reading the file it owns. A merge needs the old
+# contents, so it needs one of these; the shipped source has none of them, which
+# is why a correct answer cannot trip this. An agent that renames `OUTPUT` on
+# the way past gets round the pattern and is still convicted by the publisher's
+# task set, which a merge cannot satisfy.
+- kind: file_lacks
+  path: projects/platform/dags/plat_report_registry_sync.py
+  patterns:
+  - 'OUTPUT\s*\.\s*(read_text|read_bytes|open)'
+  - 'safe_load\s*\(\s*OUTPUT'
+
+# The 11:00 sync, between the day the work was done and the day after. The
+# write step is named: the registry checks below read the file this run was
+# meant to rewrite, so a run whose write step skips leaves a hand-edited
+# registry standing while the run itself looks green.
+- kind: dag_runs
+  dag_id: plat_report_registry_sync
+  ds: '2026-06-12'
+  require_tasks:
+  - write
+
+# What the sync wrote this morning still names the new report, with the mart the
+# ticket names and a file under its own name beside the other four. This is the
+# check the hand edit cannot pass.
+- kind: file_contains
+  path: ops/report_registry.yml
+  matches:
+  - 'marketplace_daily_summary:.*?reads:\s*marts\.gmv_daily'
+  - 'lands_at:\s*exports/reports/marketplace_daily_summary'
+  - 'seller_id'
+
+# The four that publish today, each bound to the table it reads. The sync writes
+# the whole file, so a source trimmed down to the new entry loses all four here.
+- kind: file_contains
+  path: ops/report_registry.yml
+  matches:
+  - 'account_rollup_monthly:.*?reads:\s*marts\.account_rollup'
+  - 'comp_sales_weekly:.*?reads:\s*marts\.comp_sales_daily'
+  - 'monthly_revenue_by_entity:.*?reads:\s*marts\.revenue_recognized_monthly'
+  - 'revenue_daily_summary:.*?reads:\s*marts\.daily_revenue'
+
+# The figures the ticket asked for, spelled the way the mart spells them. The
+# rendered registry carries the grain and the table but not the columns, so this
+# one reads the source. `seller_id`, `gmv_cents` and `commission_cents` are
+# `gmv_daily`'s own names, they hold no synonym, and none of them is anywhere
+# else in this file. `order_count` is already in `revenue_daily_summary`, so it
+# is tied to the new entry's own block rather than matched loose.
+- kind: file_contains
+  path: config/reports.yml
+  matches:
+  - 'seller_id'
+  - 'gmv_cents'
+  - 'commission_cents'
+  - 'marketplace_daily_summary:.*?order_count'

@@ -1,0 +1,4 @@
+{
+  "compatible": false,
+  "conflicts": ["protobuf-diamond"]
+}

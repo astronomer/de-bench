@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <info>
+    <name>history_complete</name>
+    <description>Closes the history bracket for the job.</description>
+    <extended_description>Runs once, at the end of the job, for the whole job. A step that
+closes its own bracket lets the next night start from a mark the rest of the job never
+reached, and the missing rows never come back, because the mark only ever moves
+forward.</extended_description>
+    <trans_version>1.5</trans_version>
+    <trans_type>Normal</trans_type>
+    <directory>/copperline/nightly/trn</directory>
+    <parameters/>
+    <feedback_shown>Y</feedback_shown>
+    <feedback_size>50000</feedback_size>
+    <using_thread_priorities>Y</using_thread_priorities>
+    <created_user>amireles</created_user>
+    <created_date>2019/03/12 11:31:57.024</created_date>
+    <modified_user>amireles</modified_user>
+    <modified_date>2020/02/17 11:52:44.601</modified_date>
+  </info>
+  <connection>
+    <name>copperline_wh</name>
+    <server>${CPL_WH_HOST}</server>
+    <type>GENERIC</type>
+    <access>Native</access>
+    <database>${CPL_WH_DB}</database>
+    <port>0</port>
+    <username>${CPL_WH_USER}</username>
+    <password>Encrypted 2be98afc86aa7f2e4cb14a9d61c2f8b1c</password>
+  </connection>
+  <order>
+    <hop><from>count what landed</from><to>close the bracket</to><enabled>Y</enabled></hop>
+  </order>
+  <step>
+    <name>count what landed</name>
+    <type>TableInput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <connection>copperline_wh</connection>
+    <sql>SELECT (SELECT count(*) FROM ${STAGING_SCHEMA}.inventory_balance WHERE load_id = ${LOAD_ID})
+     + (SELECT count(*) FROM ${STAGING_SCHEMA}.stock_movement    WHERE load_id = ${LOAD_ID})
+     + (SELECT count(*) FROM ${STAGING_SCHEMA}.carrier_scan      WHERE load_id = ${LOAD_ID})
+     + (SELECT count(*) FROM ${STAGING_SCHEMA}.supplier_master   WHERE load_id = ${LOAD_ID})
+       AS rows_loaded
+     , ${LOAD_ID} AS load_id</sql>
+    <limit>0</limit>
+    <lookup/>
+    <execute_each_row>N</execute_each_row>
+    <variables_active>Y</variables_active>
+    <lazy_conversion_active>N</lazy_conversion_active>
+    <cluster_schema/>
+    <GUI><xloc>112</xloc><yloc>96</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>close the bracket</name>
+    <type>ExecSQL</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <connection>copperline_wh</connection>
+    <execute_each_row>Y</execute_each_row>
+    <single_statement>Y</single_statement>
+    <replace_variables>Y</replace_variables>
+    <quoteString>N</quoteString>
+    <set_params>Y</set_params>
+    <sql>UPDATE ops.load_control
+   SET rows_loaded      = ?
+     , ended_at         = now()
+     , load_status      = 'complete'
+     , history_complete = TRUE
+ WHERE load_id = ?</sql>
+    <arguments>
+      <argument><name>rows_loaded</name></argument>
+      <argument><name>load_id</name></argument>
+    </arguments>
+    <cluster_schema/>
+    <GUI><xloc>320</xloc><yloc>96</yloc><draw>Y</draw></GUI>
+  </step>
+  <step_error_handling/>
+  <slave-step-copy-partition-distribution/>
+  <slave_transformation>N</slave_transformation>
+</transformation>

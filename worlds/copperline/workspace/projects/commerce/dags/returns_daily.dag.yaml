@@ -1,0 +1,42 @@
+dag_id: returns_daily
+schedule: "0 6 * * *"
+description: returns and their reasons, at RMA grain
+default_args:
+  owner: commerce
+  retries: 2
+tags: [commerce, raw, mart, returns]
+steps:
+  # An RMA has no date column of its own and is amended after it is raised, so
+  # the grain here is a key. The stage is emptied and refilled by the run that
+  # owns it, and the merge keys on `rma_id`.
+  reset_stage:
+    blueprint: sql_file
+    statement: returns_reset_stage
+  land:
+    blueprint: csv_intake
+    depends_on: [reset_stage]
+    source: oms/dt={{ ds }}/returns.csv
+    table: staging.returns_landing
+    columns:
+      rma_id: VARCHAR
+      order_id: VARCHAR
+      order_line_id: VARCHAR
+      qty: DECIMAL(12,3)
+      initiated_at: TIMESTAMP
+      received_at: TIMESTAMP
+      refund_cents: BIGINT
+      restock_flag: BOOLEAN
+  merge:
+    blueprint: sql_file
+    depends_on: [land]
+    statement: returns_merge
+  check_orphans:
+    blueprint: sql_file
+    depends_on: [merge]
+    statement: returns_orphan_check
+    params: ["{{ ds }}"]
+  publish:
+    blueprint: sql_file
+    depends_on: [check_orphans]
+    statement: returns_publish
+    params: ["{{ ds }}", "{{ ds }}"]

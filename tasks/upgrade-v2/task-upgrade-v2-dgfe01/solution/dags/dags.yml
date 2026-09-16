@@ -1,0 +1,14 @@
+daily_orders:
+  default_args:
+    start_date: 2025-01-01
+    retries: 1
+  schedule: '@daily'
+  catchup: false
+  tasks:
+    extract:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo extract
+    load:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo load
+      dependencies: [extract]

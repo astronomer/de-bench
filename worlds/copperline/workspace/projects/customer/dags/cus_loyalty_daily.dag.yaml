@@ -1,0 +1,62 @@
+# Loyalty points earned and burned, from the programme's nightly file.
+#
+# The file named for a day holds that day's transactions and is complete when
+# it lands at about 04:00. This runs at 07:00 and owns the PREVIOUS day: a
+# bare cron schedule makes `ds` the day the run fires, so the day being
+# loaded is written out as `{{ macros.ds_add(ds, -1) }}`.
+#
+# Consumer accounts carry an anonymous loyalty id and never enter
+# `raw.customers`, so nothing here joins a loyalty id to a trade account.
+dag_id: cus_loyalty_daily
+schedule: "0 7 * * *"
+description: loyalty points earned and burned for the previous day
+start_date: 2026-01-05
+tags: [customer, loyalty, mart, blueprint]
+default_args:
+  owner: customer
+  retries: 2
+
+steps:
+  wait_for_file:
+    blueprint: sensor_wait
+    file: "landing/loyalty/dt={{ macros.ds_add(ds, -1) }}/transactions.csv"
+    poke_interval: 300
+    timeout: 10800
+    mode: reschedule
+
+  land_transactions:
+    blueprint: csv_intake
+    depends_on: [wait_for_file]
+    source: "loyalty/dt={{ macros.ds_add(ds, -1) }}/transactions.csv"
+    table: raw.loyalty_transactions
+    mode: replace
+    partition_col: transaction_date
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    columns:
+      transaction_date: DATE
+      loyalty_id: VARCHAR
+      transaction_id: VARCHAR
+      transaction_type: VARCHAR
+      points: BIGINT
+      order_id: VARCHAR
+      store_id: VARCHAR
+
+  stage_transactions:
+    blueprint: dbt_select
+    depends_on: [land_transactions]
+    select: stg_customer__loyalty_transactions
+
+  build_loyalty:
+    blueprint: dbt_select
+    depends_on: [stage_transactions]
+    select: loyalty_daily
+    vars:
+      run_date: "{{ macros.ds_add(ds, -1) }}"
+
+  publish_loyalty:
+    blueprint: partition_export
+    depends_on: [build_loyalty]
+    source: marts.loyalty_daily
+    name: loyalty
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [store_id]

@@ -1,0 +1,22 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/customer-360.md
+model: marts.customer_360
+consumer: C-8
+owner: customer
+grain: [customer_id]
+columns:
+  - {name: customer_id, type: string, required: true}
+  - {name: account_name, type: string, required: true}
+  - {name: source_book, type: string, required: true, accepted_values: [copperline, northwave]}
+  - {name: status, type: string, required: true, accepted_values: [active, suspended, closed]}
+  - {name: first_order_date, type: date, required: false}
+  - {name: last_order_date, type: date, required: false}
+  - {name: orders_12m, type: integer, required: true}
+  - {name: net_sales_cents, type: bigint, required: true}
+  - {name: open_disputes, type: integer, required: true}
+  - {name: primary_contact_hash, type: string, required: false}
+  - {name: region, type: string, required: true}
+  - {name: updated_at, type: timestamp, required: true}
+tests:
+  - unique: [customer_id]
+  - not_null: [customer_id, account_name, source_book, status, updated_at]
+  - no_floats_in: [net_sales_cents]

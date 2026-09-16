@@ -1,0 +1,11 @@
+checks:
+- kind: scoring_primitive
+  name: no_deprecated_imports
+- kind: scoring_primitive
+  name: no_deprecated_usage
+- kind: scoring_primitive
+  name: no_removed_ti_attrs
+- kind: scoring_primitive
+  name: task_group_matches_oracle
+- kind: scoring_primitive
+  name: structural_match_taskids

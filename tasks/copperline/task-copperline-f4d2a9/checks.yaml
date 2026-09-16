@@ -1,0 +1,94 @@
+# Two faults in one query, in `projects/finance/lib/comp_history.py`, and the
+# ticket states one consequence of each.
+#
+#   1. THE MAPPING. The build finds the prior year by joining the calendar to
+#      itself on the fiscal week number. FY2023 held fifty-three weeks, so
+#      FY2024 week W compares to FY2023 week W+1: the shipped join is a week
+#      early on every row of the year and never reaches the 53rd week at all.
+#      `raw.fiscal_calendar.comp_date_ly` is the answer and `docs/retail-
+#      calendar.md` CAL-3, `docs/finance-policy.md` REV-16 and
+#      `include/lib/calendar.py` all say so.
+#   2. THE STORE JOIN. The book is joined to every row of `raw.stores`, which is
+#      SCD2: twenty-one of the stores in the book carry a prior version, so
+#      their takings are counted twice and the year comes to about nine per cent
+#      more than FY2023 took. `docs/comp-store-policy.md`: comparability is a
+#      property of the store, not of the row.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.pos_sales_daily`, `raw.fiscal_calendar` and `raw.stores` in
+# the same session.
+#
+# WHY NOTHING RUNS THE DAG. The job reads two landed tables and writes one mart
+# of its own, so a run adds nothing a direct call does not have, and it is
+# triggered by hand rather than scheduled — there is no run for a replay to
+# stand on. The verifier calls `build_year` and reads what it wrote, which also
+# removes the second reason a run would say nothing: a trial's patch never
+# carries the warehouse, so a table an agent loaded by hand is a table no check
+# can read.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code change   verifier: every figure
+#   only the store join taken once                    verifier: the three weeks
+#                                                     and the year tie
+#   only the mapping moved to the calendar            verifier: the year tie
+#   the mapping shifted the other way (W-1)           verifier: the mapping test
+#   the same-week join spelled as arithmetic (-371)   verifier: the three weeks
+#   `net_cents` (tax in it) taken as takings          verifier: the three weeks
+#                                                     and the year tie
+#   the year cut to the weeks finance looked at       verifier: 52 weeks of
+#                                                     mapping, and the tie
+#   the book read unqualified                         verifier: the frozen `nwv`
+#                                                     copy carries all three
+#                                                     table names, holds no
+#                                                     FY2023 day and keeps its
+#                                                     own calendar, so the year
+#                                                     comes back empty
+#   a check task dropped to get a green run           dag_structure
+#   the DAG or the module broken                      dag_parses
+#
+# WHAT PASSES, and should:
+#
+#   * `comp_date_ly` spelled as `business_date = cal_date - 364`. Three hundred
+#     and sixty-four days is fifty-two weeks, which IS the restated mapping on
+#     every FY2024 date, so the two agree to the cent. The shipped documents
+#     call a date offset the wrong answer; on this year's dates the calendar
+#     column and the offset return the same day, and the figures are what is
+#     graded.
+#   * taking the store version that was current in FY2023 rather than the
+#     current one. A store keeps its market across every version it carries —
+#     `test_a_store_has_one_market_however_many_versions_it_has` holds the
+#     fixture to that — so at market grain the two readings agree. Only failing
+#     to take the store once is wrong.
+#   * extra columns on the mart, or a current-year column beside the prior-year
+#     one. The ticket asks for neither and the checks read the columns it names.
+#
+# The graded weeks are FY2024 W5 (2024-03-03), W23 (2024-07-07) and W52
+# (2025-01-26), the week that compares to the 53rd. The ticket names none of
+# them. Their figures are FY2023 days, so no never-grade date carries money
+# here, and no graded week touches a reserved window.
+replay: []
+
+checks:
+
+# The tree still imports, and the job is still there.
+- kind: dag_parses
+  dag_id: fin_comp_restate_fy2024
+
+# The house shape holds: build the year, check the money is integer cents, check
+# every week landed. A year that "ties" because a check was deleted is not a fix.
+- kind: dag_structure
+  dag_id: fin_comp_restate_fy2024
+  task_ids:
+  - build
+  - check_cents
+  - check_weeks
+  operators:
+    build: PythonOperator
+    check_cents: PythonOperator
+    check_weeks: PythonOperator
+
+# The substance. See verifier/test_outputs.py — three weeks, the year's mapping,
+# the tie to the store day book, and a rerun.
+- kind: pytest_verifier
+  file: test_outputs.py

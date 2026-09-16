@@ -1,0 +1,169 @@
+# The work is one clause in one shared intermediate model, and an audit that
+# has to be measured rather than argued.
+#
+# THE SEAM. `int_customer_lifecycle` measures every date against `var('ds')` and
+# reads its orders from `int_orders_enriched` with no upper bound on
+# `order_date`. The spine is right to hold the whole book — ten other models and
+# a data test read it — but the lifecycle model has an as-of question, and a
+# build for a past day therefore aggregates the whole feed and then dates it
+# against a day most of it is after. A party whose last order is still to come
+# gets a negative `days_since_last_order` and cannot look churned; a party whose
+# first order is still to come is published at all, with a negative
+# `tenure_days`; `orders_7d` is bounded below and not above, so on a replayed
+# day it counts every order from that day to the end of the feed. The party
+# count is the same on every replayed day because it was never a function of the
+# day.
+#
+# The fault is unreachable from the nightly. `ds` is the current day and no
+# order is dated after it, so the bound removes nothing and the nightly's answer
+# does not move by a single row. `catchup=False` on every DAG in the world means
+# the only way to reach a past day is `plat_backfill_broker`, which is the
+# ticket's own story.
+#
+# NOTHING IN THE VERIFIER HOLDS AN AUTHORED VALUE. It takes the backdated day
+# off the feed (the last order date less 150 days), counts every expected result
+# from `raw.orders` under the two filters `stg_sales__orders` applies, and
+# builds the model twice — once for the world's own ds, once for the backdated
+# day — comparing both against the feed. The seven figures in RESPONSE.md are
+# authored and each carries its derivation below.
+#
+# WHY DBT RUNS AND NO DAG DOES. The world ships the landed half of the warehouse
+# only (`AGENTS.md`, "The warehouse"), so the model does not exist until dbt has
+# made it. The prepare step builds it and its ancestors — staging views plus two
+# shared intermediates, one table at the end. The nightly that runs the model,
+# `cus_customer_360_daily`, would drag the whole 360 in behind it for nothing;
+# `dag_parses` covers the tree instead.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no change     verifier: the backdated build
+#                                                    still dates past its day
+#   the bound written as `< ds` rather than        verifier: the loyalty party
+#     `<= ds`                                        set and every party's
+#                                                    orders are exact as of ds
+#   the bound pushed into int_orders_enriched      verifier: the spine is
+#     or into stg_sales__orders                      rebuilt for the backdated
+#                                                    day and counted
+#   the dates clamped instead of the orders        verifier: the party set. A
+#     bounded (greatest(0, days_since), a            party whose orders are all
+#     coalesce over a negative tenure)               still to come is still
+#                                                    published
+#   the negative rows filtered out of the final    verifier: same, from the
+#     select                                         other side — a party that
+#                                                    had ordered goes missing
+#     ... and if it is spelt as a filter on        verifier: the trade party set
+#     last_order_date <= ds, the party set comes     is right but orders_lifetime
+#     out right and the counts do not                and both windows do not
+#   a rolling window rather than an as-of bound    verifier: orders_lifetime over
+#     (`between ds - 365 and ds`)                    the model against the feed
+#   `is_churned` rewritten and the orders left     verifier: the date columns and
+#     unbounded                                      the totals both
+#   the seven columns or a party kind dropped      verifier: the model's own
+#                                                    tests, and the party sets
+#   the nightly's answer moved                     verifier: a build for the
+#                                                    world's own ds counts the
+#                                                    whole book on the feed's own
+#                                                    parties
+#   the audit written off the shipped build only   the four as-of figures
+#   the audit written off the fixed build only     the three published figures
+#   the module or the tree broken                  dag_parses
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES, and is meant to. The ticket says a build
+# for `ds` counts an order if it happened on or before `ds`; it does not say
+# where the clause goes. A `where` on the `orders` CTE, a `filter` on every
+# aggregate in `lifecycle`, a bound in the `keyed` CTE and a join against a
+# dated spine all grade identical. The model may also gain a column, a comment
+# or a rename on the way through: nothing here reads the model's text.
+#
+# WHAT IS NOT GRADED. The guest bucket answers questions about a life it does
+# not have — one row per market with a tenure, a churn flag and a
+# days-since-last-order. That is real, it is CUS-476's ticket and it is not this
+# one, so nothing here asserts anything about a guest row that a trade row is
+# not also asserted about. An agent who empties the guest life columns as well
+# is not punished for it: the verifier reads `orders_lifetime` and the date
+# columns on the guest rows, all of which CUS-476 leaves in place, and the
+# authored figures below count guest rows in populations they cannot change —
+# nine buckets against a quarter of a million parties, none of them churned
+# under either build.
+
+replay: []
+
+checks:
+
+# The tree still imports and the DAG bag is still clean. The model is on the
+# critical path of the customer project's nightly 360, and the ticket's own
+# story runs through `plat_backfill_broker`.
+- kind: dag_parses
+  dag_id: cus_customer_360_daily
+
+# The substance. See verifier/test_outputs.py — the nightly build against the
+# whole feed, a backdated build against the feed as of its own day (party set,
+# every party's orders, both rolling windows, all four date columns), and the
+# order spine still holding the whole book when it is rebuilt for that day.
+- kind: pytest_verifier
+  file: test_outputs.py
+  prepare:
+  - cd dbt/copperline_analytics && /opt/dbt-venv/bin/dbt run --select +int_customer_lifecycle --profiles-dir .
+  timeout: 1800
+
+# The churn series the replay published. Both figures are `count(*) filter
+# (where is_churned)` over `int.int_customer_lifecycle` built from the shipped
+# tree with `--vars '{ds: <day>}'`, measured on the shipped warehouse:
+# 1,758 for 2025-10-17 and 4,928 for 2026-01-16. They rise across the window
+# because the further back the day, the more of the future the build is holding.
+# An agent who fixes the model and never looks at what the replay actually
+# published cannot produce either.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b1[,\s]?758\b'
+  - '\b4[,\s]?928\b'
+
+# The same two days, off a build that answers as of its own day. 34,906 and
+# 22,911 by the same measurement with `where order_date <= {{ ds() }}` on the
+# `orders` CTE. This is the pair that carries the answer: autumn churn fell by
+# a third while the replay's series trebled. Both figures move if the bound is
+# written `<` rather than `<=`, so the pair is a check on the fix as well.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b34[,\s]?906\b'
+  - '\b22[,\s]?911\b'
+
+# Parties the 2025-10-17 build published that had not ordered by 2025-10-17.
+# 23,688 — the shipped build publishes 295,148 parties on every day of the
+# window and a bounded build for that day publishes 271,460. The same rows are
+# the ones carrying a negative `tenure_days`, so either route gives the figure.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b23[,\s]?688\b'
+
+# Rows on the 2025-10-17 build carrying a negative `days_since_last_order`.
+# 281,883 of the 295,148 published: every party whose last order falls after the
+# day the build was given, which eight months from the end of the feed is most
+# of the book.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b281[,\s]?883\b'
+
+# Orders the 2025-10-17 build counted that had not happened by that day.
+# 1,087,389 — `sum(orders_lifetime)` is 3,413,378 on the shipped build against
+# 2,325,989 on a bounded one, and the same figure is the count of spine orders
+# dated after 2025-10-17. Two routes, one number.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b1[,\s]?087[,\s]?389\b'
+
+# Why the nightly has never shown any of this, and what the fix does to it:
+# nothing. `ds` is the current day, no order is dated after it, so the bound
+# removes no row and the nightly's answer is identical either side of the fix —
+# which the verifier also asserts against the feed. The pattern is written loose
+# and spans lines, because this is a claim rather than a figure and every writer
+# spells it differently. Both orders are taken.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - "((nightly|current day|the day it runs|today|2026-06-15)[\\s\\S]{0,200}(unchanged|does not change|doesn't change|no change|nothing changes|identical|the same|removes nothing|no effect|nothing moves|no rows?)|(unchanged|no change|nothing changes|identical|removes nothing|no effect|nothing moves)[\\s\\S]{0,200}(nightly|current day|the day it runs|today|2026-06-15))"

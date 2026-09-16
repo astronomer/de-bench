@@ -1,0 +1,9 @@
+checks:
+- kind: scoring_primitive
+  name: airflow_pin_target_aligned
+- kind: scoring_primitive
+  name: baseoperator_from_sdk
+- kind: scoring_primitive
+  name: imports_clean_across_sibling_pkgs
+- kind: scoring_primitive
+  name: structural_match_taskids

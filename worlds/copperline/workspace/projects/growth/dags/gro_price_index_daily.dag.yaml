@@ -1,0 +1,57 @@
+# `marts.price_index_daily`: one row per market per lane per day, the median
+# competitor price on the lane. Merchandising quote it against our own list
+# price, so the index and the realisation model are built together.
+#
+# It runs at 07:00 because the intake lands at 06:00. The wait is on the
+# partition rather than on the intake DAG: the feed is late often enough that
+# a fixed gap would either publish an empty index or waste an hour.
+dag_id: gro_price_index_daily
+schedule: "0 7 * * *"
+description: competitor price index and price realisation by market and lane
+start_date: 2026-01-05
+tags: [growth, pricing, mart, blueprint]
+default_args:
+  owner: growth
+  retries: 2
+
+steps:
+  wait_for_prices:
+    blueprint: sensor_wait
+    asset: raw.comp_prices
+    partition_col: observed_on
+    poke_interval: 300
+    timeout: 7200
+    mode: reschedule
+
+  index_lanes:
+    blueprint: rollup
+    depends_on: [wait_for_prices]
+    source: raw.comp_prices
+    group_by: [market_code, lane_id]
+    agg: median
+    column: price_cents
+    as: index_price_cents
+    target: marts.price_index_daily
+    partition_col: observed_on
+
+  price_realization:
+    blueprint: dbt_select
+    depends_on: [index_lanes]
+    select: agg_price_realization
+    vars:
+      run_date: "{{ ds }}"
+
+  promo_performance:
+    blueprint: dbt_select
+    depends_on: [index_lanes]
+    select: agg_promo_performance
+    vars:
+      run_date: "{{ ds }}"
+
+  publish_index:
+    blueprint: partition_export
+    depends_on: [price_realization, promo_performance]
+    source: marts.price_index_daily
+    name: price_index
+    partition_col: observed_on
+    order_by: [market_code, lane_id]

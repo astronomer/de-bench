@@ -1,0 +1,10 @@
+.venv/
+browse.html
+tasks.csv
+trials.csv
+__pycache__/
+*.pyc
+.env
+.claude/
+cache/
+.DS_Store

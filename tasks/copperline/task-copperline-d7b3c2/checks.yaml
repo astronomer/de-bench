@@ -1,0 +1,101 @@
+# The work is one join and one resolution, and both of them are quiet when they
+# are wrong.
+#
+# `raw.ads_spend_daily` carries `spend_cents` and `currency_code` and NO rate
+# column, so every figure in a shared currency is a join to `raw.fx_rates`.
+# That table holds seven currencies at integer parts per million against USD,
+# one row per currency per day, with no gaps — and NO USD row, because USD is
+# the base and the implicit rate is 1,000,000 ppm. About half the day's spend
+# bills in USD, so an inner join to the rate table deletes half the answer and
+# leaves a total that still reads like money. `stg_reference__fx_rates` and
+# `dim_currency` both mint the USD row for exactly this reason and say so, so
+# the finding is in the tree twice over.
+#
+# The second half is the delivery. A report date is delivered again three to
+# seven days later with different numbers and both rows stay, so a day summed
+# off `report_date` counts the restated campaigns twice — about 13 per cent too
+# much on a graded day. `projects/growth/lib/ads.py` and
+# `gro_channel_roi_daily`'s docstring both describe the feed.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.ads_spend_daily` and `raw.fx_rates` in its own session,
+# before the build under test runs.
+#
+# ROUNDING IS NOT GRADED, and the reason is in the tree.
+# `dbt/copperline_analytics/macros/money.sql` says `to_base_cents` rounds
+# half-up on a single integer division; the expression it ships lands in DOUBLE
+# and comes out a cent higher on about two rows in five. Both readings are
+# defensible and the macro is out of scope anyway (three teams' models call it),
+# so every money assertion allows one cent either side. Measured: the macro's
+# own expression, the integer arithmetic its comment describes, and plain
+# truncation all pass. Every wrong answer below misses by thousands of cents or
+# by six orders of magnitude.
+#
+# WHY A VERIFIER RATHER THAN A DAG RUN. `gro_channel_roi_daily` has never
+# finished a run: it shells out to a bare `dbt` that is on no PATH in the image,
+# and it selects `stg_ecommerce__ads_spend` and `int_price_compared`, neither of
+# which is in the project. All three are furniture the ticket names and puts out
+# of scope. The verifier calls the build directly on three report dates and a
+# rebuild — measured at under two seconds of scoring.
+#
+# THE WRONG ANSWERS, and what convicts each (all measured against the shipped
+# warehouse):
+#
+#   nothing delivered, or a note and no code    verifier: build_day is missing
+#                                               and every test errors
+#   an inner join to raw.fx_rates, so the       verifier: the dollar-campaign
+#     base currency drops out (-47% of the      tests, plus the campaign-set,
+#     day)                                      rate and spend tests — 15 of 18
+#   the USD row treated as a data fault and     verifier: same; a raised build
+#     the day refused                           publishes nothing
+#   every delivery summed rather than the       verifier: the spend and revenue
+#     newest taken (+13%)                       tests on all three dates
+#   every delivery published as its own row     verifier: the row count in the
+#                                               campaign-set test
+#   the rate taken at the delivery date         verifier: the rate-date test,
+#     rather than the report date               and the spend figure with it
+#   parts per million read as a multiplier,     verifier: the spend test, out by
+#     or divided by a thousand                  six orders of magnitude
+#   spend converted and the platform's          verifier: the revenue tests
+#     revenue claim left in local currency
+#   the whole table rewritten on every build    verifier: the rebuild test, and
+#     rather than the one report date           the two dates it wipes
+#   the rate column left null on the base       verifier: the rate test — the
+#     currency rows                             ticket asks for a row a reader
+#                                               can redo the arithmetic from
+#   the build scoped to recent dates            verifier: 2024-09-18
+#   the mart built by hand in the warehouse     verifier: it runs the build
+#                                               itself, and a trial's patch
+#                                               carries nothing under
+#                                               include/data
+#
+# WHAT ALSO PASSES, and should:
+#
+#   a blanket `coalesce(fx_rate_ppm, 1000000)`, which is what
+#     `models/growth/channel_roi_daily.sql` already ships. It is a weaker rule
+#     than naming the base currency — it would convert an unrated currency at
+#     par — but no currency in this feed is unrated, the shipped model reads
+#     that way, and the ticket does not ask for the stronger one. Measured: it
+#     passes.
+#   any of the three roundings above.
+#   a build that also stands the mart up itself. Nothing in the workspace
+#     creates `marts.channel_spend_base_daily`, so the verifier creates it
+#     before calling the build; a `CREATE TABLE IF NOT EXISTS` in the build is
+#     harmless.
+#
+# The build is a module and no DAG calls it, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# Growth's tree still imports. The ticket sends the reader into
+# `gro_channel_roi_daily` for the background, and a growth DAG that stops
+# parsing takes the rest of the team's DAGs with it.
+- kind: dag_parses
+  dag_id: gro_channel_roi_daily
+
+# The substance. See verifier/test_outputs.py — three report dates, the four
+# rules the ticket states, and a rebuild.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

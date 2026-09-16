@@ -1,0 +1,165 @@
+# The whole ticket is `docs/finance-policy.md` §REV-12 applied to the card book,
+# and nothing about it is planted: the world ships the ledger the tender module
+# writes and the jurisdiction table the treasury team types, and the clause is
+# what stands between them.
+#
+# Four sentences of that clause do the work, and each is a different kind of
+# mistake.
+#
+#   1. THE DAY. A redemption recognizes on the redemption date. Breakage does
+#      not recognize on the day the card ages out — REV-12 dates it to "the last
+#      day of the fiscal month the card ages out", and the fiscal calendar is
+#      4-5-4. FY2026 P02 runs 2026-03-01 to 2026-04-04 and P03 runs 2026-04-05
+#      to 2026-05-02, so a fiscal month end is not a calendar month end in
+#      either of them. The consequence is a reach: the run that owns a fiscal
+#      month end has to gather every age-out in the month behind it, and every
+#      other run of that month writes no breakage at all.
+#
+#   2. THE ESCHEAT. The tender module knows nothing about escheat and writes a
+#      breakage entry for every card still holding value at 24 months, in every
+#      jurisdiction. `raw.gift_card_jurisdictions.escheat_applies` decides which
+#      of those are revenue, and half the card book sits where they are not.
+#      REV-12 also says the escheat cards' REDEMPTIONS still recognize, so this
+#      cannot be done by dropping the card.
+#
+#   3. THE RATE. Every amount on a card converts at the rate for the CARD'S
+#      ISSUE DATE, redemptions and breakage alike, because REV-7 forbids a
+#      second conversion on the recognition date. `raw.fx_rates` carries no USD
+#      row — `stg_reference__fx_rates` mints it at 1,000,000 and says so — so a
+#      rate join that does not account for the base currency loses about four
+#      fifths of the redemptions.
+#
+#   4. THE ENTITY. Struck at the sale, on every entry the card ever has, and
+#      `raw.gift_card_ledger.entity_code` carries it. Nothing here convicts a
+#      re-derivation: on the shipped tree `extracts/_boundary.entity_at` gives
+#      the ledger the same answer the policy's entity table gives, so an agent
+#      that works it out from `raw.entities` and `raw.market_config` lands where
+#      the ledger already is.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.gift_card_ledger`, `raw.gift_cards`,
+# `raw.gift_card_jurisdictions`, `raw.fiscal_calendar` and `raw.fx_rates` in the
+# same session. All five are read-only landing tables, so a tree edit cannot
+# move the answer.
+#
+# WHY NOTHING RUNS THE DAG. The subject is what a run of days leaves behind, and
+# seven scheduler runs buy nothing the direct call does not. The verifier calls
+# `gift_cards.recognize(ds)` itself, day after day, which grades the same code
+# in seconds and removes the shortcut: a day typed into the table by hand is a
+# day the replay replaces before anything reads it. The whole verifier runs in
+# under two seconds against a correct build.
+#
+# THE WRONG ANSWERS, and what convicts each. Every line below was run against
+# the built world before this task shipped.
+#
+#   nothing delivered, or a note and no code   verifier: the import fails
+#   breakage dated on its own age-out day      verifier: the replay. Six of the
+#                                              seven days move — the two month
+#                                              ends lose the whole lump and the
+#                                              ordinary days gain the age-outs
+#                                              that fell on them
+#   breakage dated on the CALENDAR month end   verifier: the replay. The lump
+#                                              lands on 31 March and 30 April,
+#                                              which are ordinary days in P02
+#                                              and P03, and neither fiscal month
+#                                              end carries anything
+#   every breakage recognized, escheat left    verifier: the replay. Recognized
+#     out of the reckoning                     breakage comes out near three
+#                                              times the true figure on the rows
+#                                              that carry any, and
+#                                              `escheated_cents` is zero
+#                                              everywhere
+#   the escheat jurisdictions dropped whole,   verifier: the replay. Their
+#     card and all                             redemptions vanish from every one
+#                                              of the seven days, and REV-12
+#                                              says those still recognize
+#   the rate read at the entry date, or at     verifier: the replay. Both base
+#     the recognition day                      columns move on every day the
+#                                              span holds, by thousands of cents
+#   the rate joined without the base           verifier: the replay. USD is
+#     currency, so USD drops                   about four fifths of the
+#                                              redemptions and both base columns
+#                                              collapse to zero on every USD row
+#   `issue` entries counted as revenue         verifier: the replay. An issue is
+#                                              a liability and REV-12 opens by
+#                                              saying so
+#   the ledger's own signs published           verifier: the replay. Every money
+#                                              figure comes out negative
+#   the day appended rather than replaced      verifier: the re-run test — the
+#                                              day carries two rows
+#   the whole table rebuilt every run          verifier: the untouched-day test.
+#                                              The ticket forbids it and
+#                                              `projects/platform/README.md`
+#                                              says why
+#   days corrected by hand in the table        verifier: it runs the days itself
+#                                              first
+#   the DAG or the module broken               dag_parses
+#   the two steps collapsed into one           dag_structure
+#
+# WHAT IS NOT CONVICTED, on purpose:
+#
+#   * EITHER ROUNDING OF THE CONVERSION. The house rule is half-up on the single
+#     division. `macros/money.sql` writes it as an integer add of 500000 and one
+#     divide — but DuckDB returns a DOUBLE from a decimal divide and
+#     `cast(x AS BIGINT)` then rounds an exact half to EVEN, so the macro's own
+#     shape and a plain `round()` disagree by up to a cent per entry, which on a
+#     month-end row runs to a hundred cents and more. Both are honest readings of
+#     one written rule, so the verifier computes both and accepts either on the
+#     two base columns.
+#     The wrong RATE moves the same columns by thousands and reaches neither.
+#     The six native-currency columns are graded exactly.
+#   * THE TIME ZONE. `docs/finance-policy.md` lists `raw.gift_cards.issued_at`
+#     and `raw.gift_card_ledger.occurred_at` among the four UTC columns that
+#     convert to the head-office zone. Measured on the built feed: every entry
+#     falls between 09:00 and 21:00 UTC, so no row anywhere in the ledger sits
+#     on a different Portland date from its UTC one. Reading the UTC day and
+#     converting first land the identical answer, and neither is convicted.
+#   * A build that carries extra columns beyond the nine the ticket lists. The
+#     verifier selects the nine by name, and plants its untouched-day row by
+#     copying one the build wrote, so a wider table is planted into as happily
+#     as a narrow one.
+#   * What `recognize` returns. The ticket asks for the rows written; nothing
+#     here reads the return value, because a build that counts one way and
+#     writes another still wrote the right rows.
+#   * Whether `tie_cards` runs at all. `dag_structure` requires the step and the
+#     ticket says what it is for; nothing here executes it.
+#   * Which day the DAG hands to `recognize`. `CONVENTIONS.md` holds a daily job
+#     back one day and the solution does, but a run that takes `{{ ds }}` is
+#     loading the same table by the same rule, and nothing here reads
+#     `op_kwargs`.
+#   * Extra steps in the DAG, or a sensor in front of them. `dag_structure`
+#     names the two the ticket asks for.
+#   * A row of zeros on a day the ledger recognizes nothing for. The seven
+#     graded days all carry redemptions, so nothing here decides it.
+#
+# The graded days are 2026-03-30, 2026-03-31, 2026-04-03, 2026-04-04,
+# 2026-04-05, 2026-04-30 and 2026-05-02. The ticket names none of them and no
+# date at all. The span sits outside both reserved windows (2026-06-01..09 and
+# 2025-08-31..2025-10-04) and outside FY2026 P04, which the close build-up task
+# grades.
+replay: []
+
+checks:
+
+# The new DAG renders and the bag still has no import errors.
+- kind: dag_parses
+  dag_id: fin_gift_card_recognition_daily
+
+# The two steps the ticket asks for, as operators. `tie_cards` exists to make an
+# escheat filed as revenue loud in the DAG's own log rather than in a treasury
+# meeting a quarter later; folding it into the build removes the only thing in
+# the run that would catch it.
+- kind: dag_structure
+  dag_id: fin_gift_card_recognition_daily
+  task_ids:
+  - recognize
+  - tie_cards
+  operators:
+    recognize: PythonOperator
+    tie_cards: PythonOperator
+
+# The substance. See verifier/test_outputs.py — seven recognition days, a
+# re-run, and a day no run reached.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

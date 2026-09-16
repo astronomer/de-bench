@@ -1,0 +1,86 @@
+# Data table for the astronomer-cosmos 0.x → 1.x migration primitives.
+#
+# Sources:
+# - otto-upgrade-kb v1/providers/cosmos/_annotations.json (9 transitions)
+# - otto-upgrade-kb v1/providers/cosmos/1.0.0.json (47-entry import_changes map +
+#   deprecated_params)
+#
+# `min_version` is the post-1.14 floor — the corpus targets 1.14.1, the
+# latest release line that customers default to. Adding a new breaking
+# transition is a YAML edit; only a new *detection shape* needs Python.
+
+min_version: "1.14.0"
+
+# 0.x → 1.0 import-path cliff (PR #339, #360). The KB ships a 47-entry
+# import_changes map; the rule collapses to "any cosmos import under
+# `cosmos.providers.dbt`, `cosmos.dag`, or `cosmos.task_group` is
+# legacy and must move under `cosmos.airflow`, `cosmos.operators`, or
+# the post-1.0 namespace".
+imports:
+  forbidden_module_prefixes:
+    - "cosmos.providers.dbt"
+    - "cosmos.dag"
+    - "cosmos.task_group"
+  # Module prefixes the post-1.0 layout exposes. A migrated import
+  # path must start with one of these (or be a non-cosmos import).
+  allowed_post_1_0_prefixes:
+    - "cosmos.airflow"
+    - "cosmos.operators"
+    - "cosmos.config"
+    - "cosmos.profiles"
+    - "cosmos.io"
+    - "cosmos.constants"
+
+# `DbtDag` / `DbtTaskGroup` constructor reshape (PR #389). Pre-1.0
+# top-level kwargs were removed and replaced with `ProjectConfig` /
+# `ProfileConfig` / `ExecutionConfig` / `RenderConfig` objects.
+constructors:
+  dbtdag_classes:
+    - "DbtDag"
+    - "DbtTaskGroup"
+  forbidden_dbtdag_kwargs:
+    - "dbt_root_path"
+    - "dbt_project_name"
+    - "conn_id"
+    - "profile_args"
+    - "profile_name_override"
+    - "target_name_override"
+    - "dbt_args"
+  required_config_kwargs:
+    project_config: "ProjectConfig"
+    profile_config: "ProfileConfig"
+
+# 1.6.0 default-parser flip (PR #1101). Cosmos started invoking
+# `dbt ls` automatically when `profile_config` was set, regardless
+# of `LoadMode`. To preserve pre-1.6 behaviour, callers must set an
+# explicit `load_method=` (or `load_mode=` — both spellings are
+# accepted by RenderConfig). The metric requires the kwarg, not a
+# specific value, since the right value depends on the project.
+render_config:
+  explicit_load_kwargs:
+    - "load_method"
+    - "load_mode"
+
+# 1.7.0 dataset emission switched to `DatasetAlias` (PRs #1217 and
+# #1240). Downstream DAGs scheduled on Cosmos-emitted dataset URIs
+# must wrap the URI in `DatasetAlias(...)` instead of bare
+# `Dataset(...)`.
+datasets:
+  legacy_dataset_class: "Dataset"
+  required_dataset_alias_class: "DatasetAlias"
+
+# dbt-deps control moved between config objects across this range.
+# 1.6.0 had `RenderConfig.dbt_deps` (default True); by 1.14.1 the
+# setting lives on `ProjectConfig.install_dbt_deps` (default True)
+# and `RenderConfig.dbt_deps` is gone. An upgrade that carries the
+# old kwarg over, or drops it silently, changes when `dbt deps`
+# runs at parse time. Migration: set `install_dbt_deps=` explicitly
+# on ProjectConfig so the behaviour is pinned rather than inherited.
+#
+# NOTE: `install_deps` (no `dbt_`) is NOT a ProjectConfig kwarg in
+# any version in this range — it is an operator_args key, deprecated
+# since 1.9. Naming it here previously made this check unpassable:
+# ProjectConfig has no **kwargs, so the "correct" answer raised
+# TypeError at DAG parse. See RCA-UPGRADE-V2-FOUR-ZERO-TASKS.md.
+project_config:
+  explicit_install_deps_kwarg: "install_dbt_deps"

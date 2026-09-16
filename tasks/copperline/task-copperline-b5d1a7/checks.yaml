@@ -1,0 +1,166 @@
+# `int_orders_enriched` ranks an order's payment attempts on day gap, then a
+# success ahead of a failure, then the attempt number — and stops. That is not a
+# unique key. 206,992 orders have more than one attempt inside the seven-day
+# window and 59,947 of those carry two that rank level on all three, so
+# `row_number()` returns whichever the engine hands it first and the order comes
+# back with either intent from one read to the next. Nothing is planted: this is
+# the shipped model meeting the shipped feed.
+#
+# The second half of the ticket is the flag over the same population. The model's
+# note says `payment_match_is_ambiguous` means more than one ORDER shares the
+# reference in the window; the code is `candidate_count > 1` and counts the
+# ATTEMPTS. The two readings are not close: the `OE-` reference does recycle, but
+# it comes back round in date order and the nearest two live orders sharing one
+# sit 50 days apart against a window 15 days wide, so no attempt in the estate is
+# a candidate for two orders and the note's population is nought. The flag has
+# been feeding an exception queue a fifth of the matched book for a year and none
+# of it is what the queue is for.
+#
+# EVERY FIGURE BELOW WAS MEASURED ON THE BAKED FULL-PROFILE WAREHOUSE, from
+# `raw.orders` (test and deleted rows dropped, as `stg_sales__orders` drops them)
+# joined to `raw.payment_intents` on the reference within the order's date plus
+# or minus seven days:
+#
+#   3,413,378  live orders
+#     914,694  match at least one attempt
+#     206,992  match more than one            -> `payment_match_is_ambiguous`
+#      59,947  carry two attempts level on the three shipped keys
+#           0  have an attempt another order could also claim
+#      58,960  of the 59,947 would publish a different `settled_net_cents`
+# 807,149,253  cents: the most that column can differ across the book
+#  2025-11-28  the worst day, with 6,236 of the 59,947 on it
+#
+# The money figure is `int_payment_matched`'s own arithmetic: Meridian's captures
+# less its refunds over the live events (`deleted_at` gone, superseded gone), for
+# each of the two attempts, added over every order where they differ. The Halcyon
+# half keys on `order_id` and does not move with the pick.
+#
+# NOTHING IN THE VERIFIER HOLDS AN AUTHORED VALUE. It reranks the feed in the
+# same session and compares order by order. The figures above are graded only
+# where the ticket asks for them in writing.
+#
+# WHY DBT RUNS. `int_orders_enriched` is a view and the world ships the landed
+# half of the warehouse only, so the relation does not exist until dbt has made
+# it. The prepare step builds it and the reader above it. No DAG replays.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   leave the model alone and only write      verifier: the pick against the rule
+#     the note                                on the 59,947 — wrong on about half
+#                                             of them, and a different half every
+#                                             read
+#   break the tie on `intent_id` alone        verifier: the two orderings disagree
+#                                             on 30,049 orders, and the ticket
+#                                             names `created_at` first
+#   break it on the LATEST attempt            verifier: wrong on all 59,947
+#   put `created_at` at the front of the      verifier: the untied orders — 140,686
+#     ordering                                orders change attempt
+#   rank on the attempt number first          verifier: the untied orders — 127,147
+#   widen or narrow the seven-day window      verifier: the flag no longer agrees
+#                                             with "more than one attempt in the
+#                                             window", and the untied picks move
+#   deduplicate the attempts in staging       verifier: the staging view is 1:1
+#                                             with the landed feed
+#   re-cut `payment_match_is_ambiguous` to    verifier: the flag is graded against
+#     mean what the note says (nought rows)   `candidate_count > 1`; the ticket
+#                                             says to explain it, not move it
+#   turn the attempt join inner so the ties   verifier: the orders with no attempt
+#     go away                                 in their window, and the grain
+#   drop or rename a published column         verifier: `int_payment_matched`
+#                                             selects the six by name
+#   a note and no code change                 the verifier
+#   a code change and no note                 five written checks
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES. `created_at` on its own settles every tie
+# in the built world — no two attempts share an instant — so a model that appends
+# `created_at` and stops lands on exactly the same answer as one that appends
+# `created_at, intent_id`. Both pass, and nothing here prefers one spelling. Where
+# the reply puts the figures is not graded either: a table satisfies these
+# patterns as readily as a sentence.
+
+replay: []
+
+checks:
+
+# The substance: the pick against the ticket's rule, order by order, split into
+# the orders that already had a clear winner and the orders that did not; the
+# same read twice; the flag; the staging view; the reader. See
+# verifier/test_outputs.py.
+- kind: pytest_verifier
+  file: test_outputs.py
+  prepare:
+  - cd dbt/copperline_analytics && /opt/dbt-venv/bin/dbt run --select +int_payment_matched --profiles-dir .
+  timeout: 1800
+
+# The written half. Patterns are matched case-insensitively with re.search and
+# are written loose on purpose: each pins a figure or a name, never a phrasing,
+# and a number may carry a comma or a space or neither.
+
+# What the flag is true of, and what it is really selecting. The count is one
+# read of the feed; the reading is the finding. A reply that gives the number and
+# then repeats the note's own sentence back has not answered the question the
+# ticket asked.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b206[,\s]?992\b'
+  - '(more than one attempt|multiple attempts|two or more attempts|number of attempts|count(s|ed|ing)?[^\n]{0,30}attempts|attempts[^\n]{0,20}in the window|candidate_count|attempted more than once|retr(y|ies|ied|ying))'
+
+# How much of the estate is ambiguous the way the note describes. The answer is
+# nought and it is the half of the ticket that says whether the exception queue
+# is worth running. The pattern wants the nothing said against the claim it
+# answers, either way round; a reply that never reaches the question, or that
+# reports the 206,992 as if they were the note's population, has not settled it.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The windows are sentence-tempered ((?!\.\s), the a6d2f8 form) after a
+  # 3-trial audit: markdown wrapped "a second order's window also claiming
+  # the same attempt — is 0" across a line and the same-line window could
+  # not see it. The 206,992-as-the-population wrong answer has no negator
+  # inside a sentence of the claim either way.
+  - '((\bno\b|\bnone\b|\bzero\b|\b0\b|not one|not a single|never)(?:(?!\.\s)[\s\S]){0,80}(ambiguous|share[sd]?[^\n]{0,20}reference|two (different )?orders|another order|more than one order|second order)|(ambiguous|share[sd]?[^\n]{0,20}reference|two (different )?orders|another order|more than one order|second order)(?:(?!\.\s)[\s\S]){0,80}(\bno\b|\bnone\b|\bzero\b|\b0\b|not one|not a single|never))'
+
+# How many orders can come back with a different attempt. This is the headline
+# and it is not the 206,992: an order with three attempts a day apart has one
+# clear winner and never moves. A reply that reports the flag's population as the
+# unstable one fails here.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b59[,\s]?947\b'
+
+# What it costs. Two figures, and they are separate questions: how many of the
+# unstable orders would publish different money, and the most that money can
+# differ over the book. Reaching either means following the pick into
+# `int_payment_matched` and netting Meridian's live events per attempt. The
+# ticket asks for the MOST the column could differ, so the maximum over the two
+# candidates is what is pinned — a reply that diffs two builds it happened to run
+# and reports about half of it has answered a different question.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b58[,\s]?960\b'
+  - '\b807[,\s]?149[,\s]?253\b'
+
+# The worst day. A tenth of the whole population is on Black Friday, because the
+# volume spike put the duplicate attempts through in a block. It is the one
+# figure that cannot come out of a single aggregate over the feed.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(2025-11-28|28[- ]?nov|november 28)'
+  - '\b6[,\s]?236\b'
+
+# Which columns move. Two do and five cannot, and the reason is the tie itself:
+# attempts that rank level share the day, the outcome and the attempt number by
+# construction, so only the intent id and the timestamp beside it can differ.
+# `payment_intent_id` and `payment_outcome` are in the ticket; `payment_attempted_at`
+# and `payment_attempt_no` are not, and neither is reachable without reading the
+# model's own select list and working out what a tie holds constant.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'payment_attempted_at'
+  - '(payment_attempt_no|attempt number)'
+  - '(payment_outcome|is_paid)'

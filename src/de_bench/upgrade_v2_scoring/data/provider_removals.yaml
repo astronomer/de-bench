@@ -1,0 +1,37 @@
+# Provider-package removals/relocations consumed by AF2->AF3 migration
+# primitives. These come from per-provider release notes (cncf-kubernetes
+# 10.x, snowflake 6.x, google 10.x), NOT Airflow core, but customers
+# typically hit them at the same time as the AF3 migration so the
+# detection primitives need a single union view.
+#
+# Split out from `af3_migrations.yaml` (AI-404) so adding a new
+# provider-side break doesn't require editing the airflow-core file.
+# Same per-domain split pattern as `cosmos_idioms.yaml`,
+# `dag_factory_idioms.yaml`, `provider_compat_matrix.yaml`.
+#
+# Source for every entry: the provider's CHANGELOG and the release
+# PR that landed the removal. The data accessors in
+# `data/__init__.py` (`removed_modules`, `deprecated_kwargs`,
+# `removed_symbols`) union these entries with the matching keys in
+# `af3_migrations.yaml` so consumer primitives stay unchanged.
+
+# Module relocations from provider major bumps. Same shape as
+# af3_migrations.yaml::removed_modules; consumed by
+# `no_deprecated_imports` and `imports_clean_across_sibling_pkgs`.
+removed_modules:
+  - airflow.providers.cncf.kubernetes.operators.kubernetes_pod  # cncf-kubernetes ≥10
+  - airflow.providers.snowflake.operators.snowflake             # snowflake ≥6
+
+# Operator kwargs removed in provider major bumps. Same shape as
+# af3_migrations.yaml::deprecated_kwargs; consumed by
+# `no_deprecated_usage`.
+deprecated_kwargs:
+  - is_delete_operator_pod  # cncf-kubernetes ≥10
+  - snowflake_conn_id       # snowflake ≥6 (SnowflakeOperator removed)
+
+# Operator/symbol names removed in provider major bumps. Same shape
+# as af3_migrations.yaml::removed_symbols; consumed by
+# `no_deprecated_usage`.
+removed_symbols:
+  - BigQueryExecuteQueryOperator  # google ≥10
+  - SnowflakeOperator             # snowflake ≥6

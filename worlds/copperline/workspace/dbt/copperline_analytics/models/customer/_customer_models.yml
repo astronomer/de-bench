@@ -1,0 +1,146 @@
+version: 2
+
+models:
+
+  - name: dim_customer
+    description: Conformed dimension, built by the customer team. See the model header.
+    columns:
+      - name: customer_key
+        tests: [unique, not_null]
+      - name: customer_id
+        tests: [not_null]
+      - name: source_book
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['copperline', 'northwave']
+      - name: status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['active', 'suspended', 'closed']
+
+  - name: customer_360
+    description: contracts/customer_360.yml, consumer C-8.
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: account_name
+        tests: [not_null]
+      - name: source_book
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['copperline', 'northwave']
+      - name: status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['active', 'suspended', 'closed']
+      - name: open_disputes
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: feature_customer_daily
+    description: contracts/feature_customer_daily.yml, consumer C-9. Point in time.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, customer_id]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: customer_id
+        tests: [not_null]
+      - name: region_as_of
+        tests: [not_null]
+      - name: status_as_of
+        tests: [not_null]
+      - name: orders_7d
+        tests: [not_null]
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: agg_customer_rfm
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: rfm_segment
+        tests:
+          - accepted_values:
+              values: ['champion', 'loyal', 'promising', 'at risk, valuable', 'lapsing', 'steady']
+      - name: recency_score
+        tests:
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+              quote: false
+
+  - name: agg_cohort_retention
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [cohort_month, months_since]
+    columns:
+      - name: cohort_month
+        tests: [not_null]
+      - name: cohort_size
+        tests: [not_null]
+
+  - name: fct_tickets
+    columns:
+      - name: ticket_key
+        tests: [unique, not_null]
+      - name: party_source
+        tests:
+          - accepted_values:
+              values: ['oms', 'nwv']
+      - name: opened_date
+        tests: [not_null]
+
+  - name: support_sla_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, category_area, channel, source_book]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: tickets_opened
+        tests: [not_null]
+
+  - name: fct_campaign_responses
+    columns:
+      - name: campaign_response_key
+        tests: [unique, not_null]
+      - name: campaign_id
+        tests: [not_null]
+      - name: customer_id
+        tests: [not_null]
+
+  - name: loyalty_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, channel_key, geography_key]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: order_count
+        tests: [not_null]
+
+  - name: churn_scores_weekly
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: churn_score
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+              inclusive: true
+      - name: churn_risk
+        tests:
+          - accepted_values:
+              values: ['low', 'medium', 'high']

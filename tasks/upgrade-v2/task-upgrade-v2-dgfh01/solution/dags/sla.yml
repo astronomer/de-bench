@@ -1,0 +1,15 @@
+sla_monitored:
+  default_args:
+    start_date: 2025-01-01
+    sla:
+      __type__: datetime.timedelta
+      seconds: 3600
+  schedule: '@daily'
+  tasks:
+    extract:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo extract
+    transform:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo transform
+      dependencies: [extract]

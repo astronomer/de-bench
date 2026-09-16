@@ -1,0 +1,105 @@
+# The whole ticket is one join. A Meridian settlement event carries `order_ref`
+# and it carries `intent_id`. The reference is seven digits over an order key
+# that runs past 180,000,000, so it recycles every fifty days of volume and
+# names about seventeen orders across the range — `docs/billing-integration.md`
+# B-6, `docs/runbooks/processor-migration.md`, the `stg_payment_intents`
+# docstring and `int_orders_enriched`'s all say so. `intent_id` is exact.
+#
+# The trap is not the fan-out; the fan-out is loud and the ticket's own grain
+# rule catches it. The trap is the repair: join on the reference, then keep the
+# order nearest the event's own date. That is right for an authorization, which
+# happens on the day of the order, and wrong for every refund and every
+# chargeback, which happen weeks later and land on whichever recycled order
+# sits nearer. It conserves the day's row count and the day's money to the
+# cent. It is the attempt's clock that separates orders fifty days apart, and
+# the attempt row is in the bridge.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.pay_meridian_settlements`, `raw.payment_intents` and
+# `raw.orders` in the same session, and its first test proves each graded day
+# can still tell the answers apart.
+#
+# WHY NOTHING RUNS THE DAG. The verifier calls `attribution.build_daily(ds)`
+# directly, which grades the same code in seconds and removes the shortcut: a
+# day typed into the table by hand is a day the next build replaces before
+# anything reads it. A `dag_runs` check would also grade the scheduler, and the
+# scheduler is not the subject.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered                          verifier: the import fails
+#   the reference joined straight to the order  verifier: the grain test — one
+#     (about seven orders per event)            event, seven rows
+#   the reference, then the order nearest the   verifier: the three graded days.
+#     event's own date                          Row count and cents both tie;
+#                                               the refunds and chargebacks sit
+#                                               under the wrong order
+#   the reference, narrowed to orders near the  verifier: the grain test — the
+#     event's date                              refunds and chargebacks drop
+#   `int_orders_enriched.payment_intent_id`     verifier: the grain test. That
+#     reused as the order-to-payment link       model keeps ONE attempt per
+#                                               order; every event of a retried
+#                                               order's other attempts falls out
+#   the bridge joined on `order_ref` and        verifier: the grain test —
+#     `attempt_no` instead of `intent_id`       attempt 1 of seven orders
+#   `raw.payment_intents.order_id` matched      verifier: nothing joins, so the
+#     against `raw.orders.order_id`             day is empty. The ticket says
+#                                               plainly that it does not resolve
+#   the day taken from `loaded_at`              verifier: the day is short by
+#                                               the late tail. The ticket names
+#                                               `event_time_utc`
+#   restatements or soft-deleted rows filtered  verifier: the grain test. The
+#     out                                       ticket says do not filter
+#   the day appended rather than replaced       verifier: the rebuild test
+#   the table emptied before each build         verifier: the other-days test
+#   three days corrected by hand                verifier: it runs the build
+#     in the table                              itself first
+#   the DAG or the module broken                dag_parses
+#   the two steps collapsed into one            dag_structure
+#
+# WHAT IS NOT CONVICTED, on purpose:
+#
+#   * A build that carries extra columns beyond the six the ticket lists. The
+#     verifier selects the six by name. More is a defensible reading of a squad
+#     working table; fewer fails to read at all.
+#   * Which day the DAG hands to `build_daily`. `CONVENTIONS.md` holds a daily
+#     output back one day and the solution does, but a run that builds `{{ ds }}`
+#     is building the same table by the same rule and nothing here looks at
+#     `op_kwargs`.
+#   * The window width used to tie an attempt to its order. Anything from a day
+#     to twenty-five days either side admits exactly one order, because the
+#     reference recycles every fifty days and an attempt is raised one or two
+#     days after its order. The ticket states a week and `int_orders_enriched`
+#     uses a week.
+#   * Extra steps in the DAG. `dag_structure` names the two the ticket asks
+#     for; a sensor in front of them is a reasonable thing to add.
+#
+# The graded days are 2025-12-09, 2026-01-22 and 2026-04-14. The ticket names
+# none of them and no date at all. All three sit outside the reserved windows
+# and outside the 2025 processor overlap quarter.
+replay: []
+
+checks:
+
+# The new DAG renders and the bag still has no import errors.
+- kind: dag_parses
+  dag_id: psp_attribution_daily
+
+# The two steps the ticket asks for, as operators. `check_grain` exists to make
+# a wrong join loud in the DAG's own log rather than in the spreadsheet six
+# weeks later; folding it into the build removes the only thing that would have
+# caught the fan-out at three in the morning.
+- kind: dag_structure
+  dag_id: psp_attribution_daily
+  task_ids:
+  - build_attribution
+  - check_grain
+  operators:
+    build_attribution: PythonOperator
+    check_grain: PythonOperator
+
+# The substance. See verifier/test_outputs.py — three days the ticket does not
+# name, the ticket's grain rule, a rebuild and a second day.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

@@ -1,0 +1,67 @@
+jurisdiction_code,market_code,jurisdiction_name,subdivision_code,escheat_applies,dormancy_months,escheat_to,breakage_allowed,breakage_after_months,statute_ref,effective_from
+US-01,US,Oregon,OR,false,,,true,24,US-OR-GCA,2024-02-04
+US-02,US,Washington,WA,false,,,true,24,US-WA-GCA,2024-02-04
+US-03,US,California,CA,false,,,true,24,US-CA-GCA,2024-02-04
+US-04,US,Texas,TX,true,36,TX unclaimed property office,false,,US-TX-UPA,2024-02-04
+US-05,US,Illinois,IL,true,36,IL unclaimed property office,false,,US-IL-UPA,2024-02-04
+US-06,US,New York,NY,true,60,NY unclaimed property office,false,,US-NY-UPA,2024-02-04
+US-07,US,Florida,FL,false,,,true,24,US-FL-GCA,2024-02-04
+US-08,US,Massachusetts,MA,true,60,MA unclaimed property office,false,,US-MA-UPA,2024-02-04
+US-09,US,Georgia,GA,false,,,true,24,US-GA-GCA,2024-02-04
+US-10,US,Colorado,CO,true,36,CO unclaimed property office,false,,US-CO-UPA,2024-02-04
+US-11,US,Arizona,AZ,false,,,true,24,US-AZ-GCA,2024-02-04
+US-12,US,Pennsylvania,PA,true,60,PA unclaimed property office,false,,US-PA-UPA,2024-02-04
+US-13,US,Michigan,MI,true,36,MI unclaimed property office,false,,US-MI-UPA,2024-02-04
+US-14,US,Ohio,OH,true,36,OH unclaimed property office,false,,US-OH-UPA,2024-02-04
+US-15,US,North Carolina,NC,true,36,NC unclaimed property office,false,,US-NC-UPA,2024-02-04
+US-16,US,Virginia,VA,true,36,VA unclaimed property office,false,,US-VA-UPA,2024-02-04
+US-17,US,Tennessee,TN,true,36,TN unclaimed property office,false,,US-TN-UPA,2024-02-04
+US-18,US,Indiana,IN,true,60,IN unclaimed property office,false,,US-IN-UPA,2024-02-04
+US-19,US,Missouri,MO,true,36,MO unclaimed property office,false,,US-MO-UPA,2024-02-04
+US-20,US,Wisconsin,WI,true,36,WI unclaimed property office,false,,US-WI-UPA,2024-02-04
+US-21,US,Minnesota,MN,true,60,MN unclaimed property office,false,,US-MN-UPA,2024-02-04
+US-22,US,Maryland,MD,true,60,MD unclaimed property office,false,,US-MD-UPA,2024-02-04
+US-23,US,Nevada,NV,true,36,NV unclaimed property office,false,,US-NV-UPA,2024-02-04
+US-24,US,Utah,UT,false,,,true,24,US-UT-GCA,2024-02-04
+US-25,US,Idaho,ID,false,,,true,24,US-ID-GCA,2024-02-04
+US-26,US,New Jersey,NJ,true,36,NJ unclaimed property office,false,,US-NJ-UPA,2024-02-04
+CA-01,CA,Ontario,ON,false,,,true,24,CA-ON-GCA,2024-02-04
+CA-02,CA,Quebec,QC,true,36,QC unclaimed property office,false,,CA-QC-UPA,2024-02-04
+CA-03,CA,British Columbia,BC,false,,,true,24,CA-BC-GCA,2024-02-04
+CA-04,CA,Alberta,AB,true,60,AB unclaimed property office,false,,CA-AB-UPA,2024-02-04
+CA-05,CA,Manitoba,MB,false,,,true,24,CA-MB-GCA,2024-02-04
+CA-06,CA,Saskatchewan,SK,false,,,true,24,CA-SK-GCA,2024-02-04
+CA-07,CA,Nova Scotia,NS,false,,,true,24,CA-NS-GCA,2024-02-04
+CA-08,CA,New Brunswick,NB,false,,,true,24,CA-NB-GCA,2024-02-04
+DE-01,DE,Bayern,BY,false,,,true,24,DE-BY-GCA,2025-04-07
+DE-02,DE,Baden-Wuerttemberg,BW,false,,,true,24,DE-BW-GCA,2025-04-07
+DE-03,DE,Nordrhein-Westfalen,NW,false,,,true,24,DE-NW-GCA,2025-04-07
+DE-04,DE,Hessen,HE,false,,,true,24,DE-HE-GCA,2025-04-07
+DE-05,DE,Niedersachsen,NI,false,,,true,24,DE-NI-GCA,2025-04-07
+DE-06,DE,Berlin,BE,false,,,true,24,DE-BE-GCA,2025-04-07
+DE-07,DE,Hamburg,HH,false,,,true,24,DE-HH-GCA,2025-04-07
+DE-08,DE,Sachsen,SN,false,,,true,24,DE-SN-GCA,2025-04-07
+DE-09,DE,Rheinland-Pfalz,RP,false,,,true,24,DE-RP-GCA,2025-04-07
+DE-10,DE,Schleswig-Holstein,SH,false,,,true,24,DE-SH-GCA,2025-04-07
+DE-11,DE,Brandenburg,BB,false,,,true,24,DE-BB-GCA,2025-04-07
+DE-12,DE,Thueringen,TH,false,,,true,24,DE-TH-GCA,2025-04-07
+GB-01,GB,England,ENG,false,,,true,24,GB-ENG-GCA,2025-04-07
+GB-02,GB,Scotland,SCT,false,,,true,24,GB-SCT-GCA,2025-04-07
+GB-03,GB,Wales,WLS,false,,,true,24,GB-WLS-GCA,2025-04-07
+GB-04,GB,Northern Ireland,NIR,false,,,true,24,GB-NIR-GCA,2025-04-07
+BR-01,BR,Sao Paulo,SP,false,,,true,24,BR-SP-GCA,2026-02-01
+BR-02,BR,Rio de Janeiro,RJ,false,,,true,24,BR-RJ-GCA,2026-02-01
+BR-03,BR,Minas Gerais,MG,false,,,true,24,BR-MG-GCA,2026-02-01
+BR-04,BR,Parana,PR,false,,,true,24,BR-PR-GCA,2026-02-01
+BR-05,BR,Bahia,BA,false,,,true,24,BR-BA-GCA,2026-02-01
+MX-01,MX,Ciudad de Mexico,CMX,false,,,true,24,MX-CMX-GCA,2026-02-01
+MX-02,MX,Jalisco,JAL,false,,,true,24,MX-JAL-GCA,2026-02-01
+MX-03,MX,Nuevo Leon,NLE,false,,,true,24,MX-NLE-GCA,2026-02-01
+MX-04,MX,Estado de Mexico,MEX,false,,,true,24,MX-MEX-GCA,2026-02-01
+PL-01,PL,Mazowieckie,MZ,false,,,true,24,PL-MZ-GCA,2026-02-01
+PL-02,PL,Malopolskie,MA,false,,,true,24,PL-MA-GCA,2026-02-01
+PL-03,PL,Wielkopolskie,WP,false,,,true,24,PL-WP-GCA,2026-02-01
+IE-01,IE,Leinster,L,false,,,true,24,IE-L-GCA,2025-04-07
+IE-02,IE,Munster,M,false,,,true,24,IE-M-GCA,2025-04-07
+ID-01,ID,DKI Jakarta,JK,false,,,true,24,ID-JK-GCA,2026-02-01
+ID-02,ID,Jawa Barat,JB,false,,,true,24,ID-JB-GCA,2026-02-01

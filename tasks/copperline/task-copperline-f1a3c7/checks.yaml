@@ -1,0 +1,140 @@
+# Nothing is planted. `sc_shrink_weekly` ships as it is described here and the
+# ticket asks for it working.
+#
+# THREE FAULTS, all in `projects/supply/dags/sc_shrink_weekly.py`, and the world
+# ships all three:
+#
+#   1. `marts.shrink_weekly` has no DDL anywhere in the tree, so `build_shrink`
+#      dies on its DELETE and the job has never produced a row.
+#   2. The position is joined on `snapshot_date = occurred_at::DATE`. The
+#      network snapshot is weekly and the A-class one daily, so most
+#      cycle-count movements find no position and land in a `dept_code IS NULL`
+#      group priced at nothing. Measured over the whole feed: 9,423 of 59,712
+#      movements match on an equality join, and 59,712 of 59,712 on an ASOF
+#      join. The equality rate is about one in seven a month until the A-class
+#      snapshot turns daily on 2026-03-17 and higher after it.
+#   3. `sum(m.qty * coalesce(s.unit_cost_cents, 0))`. `unit_cost_cents` is
+#      populated to 2026-01-31 and NULL from 2026-02-01, when
+#      `retail_value_cents` and `cost_complement_bps` start — the FY2026
+#      valuation change, which `docs/inventory-policy.md` INV-1 is the only
+#      statement of. So every FY2026 week prices at exactly zero and every run
+#      is green.
+#
+# WHY THREE RUNS AND A VERIFIER. The pack is a DAG output and the warehouse
+# ships without `marts.*` (AGENTS.md, "The warehouse"), so the three graded
+# Thursdays build it from `raw.*` and the verifier reads what they wrote. That
+# also means the DDL is graded without pinning where it lives: a `CREATE TABLE`
+# inside the build, a step of its own, or a SQL file all work, and a run that
+# never creates the table fails on the run.
+#
+#   2026-01-29  covers the week of 2026-01-18, FY2025-P12 W51, the last one
+#               under weighted-average cost.
+#   2026-02-26  covers 2026-02-15, FY2026-P01 W3, inside the span the request
+#               names.
+#   2026-04-30  covers 2026-04-19, FY2026-P03 W12, nine weeks later and named
+#               nowhere.
+#
+# No `dag_structure` on purpose. The table has to be created somewhere, and a
+# task-id set fixed here would fail an agent who gave that its own step — which
+# is the shape the rest of supply uses.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.wms_movements`, `raw.inventory_snapshots` and
+# `raw.dept_cost_complement` in the same session.
+#
+# THE WRONG ANSWERS, and what convicts each. Every figure below was measured
+# against the built world.
+#
+#   nothing delivered, or a note and no code       dag_runs: the build still
+#                                                  dies on the missing table
+#   the table created and nothing else             verifier: FY2026 weeks come
+#                                                  out at zero, and 12 rows a
+#                                                  week carry no department
+#   the era fixed, the equality join kept          verifier: 4 of 7 tests. The
+#                                                  week comes out at 52-66 rows
+#                                                  instead of 60, with a
+#                                                  no-department row on each
+#                                                  site
+#   FY2026 valued at the last unit cost the feed   verifier: every row of both
+#     ever sent (a second ASOF into January)       retail weeks, 6.8% and 6.9%
+#                                                  light — the department uplift
+#                                                  the two methods differ by
+#   the complement applied per SKU and rounded     verifier: 52 of 60 rows and
+#     there, then summed (INV-3 says once, per     50 of 60 miss by more than a
+#     department)                                  cent
+#   the retail method applied to FY2025 as well    verifier: the 2026-01-18 week
+#     (INV-4 forbids restating it)                 is graded to the cent
+#   `retail_value_cents` read as a unit price      verifier: wrong by the units
+#                                                  on hand, which is a factor of
+#                                                  tens
+#   counts dropped so the money ties               verifier: the units by
+#                                                  location come off the
+#                                                  movement log
+#   the week window widened to make rows appear    verifier: the pack holds the
+#                                                  three weeks and no others
+#   the DAG or the module broken                   dag_parses
+#
+# TWO READINGS BOTH PASS, and the ticket does not choose between them. The
+# complement can be taken from the position row the count was priced against or
+# from `raw.dept_cost_complement` for that department and fiscal period; the two
+# drift a few basis points apart and differ on every row by about a tenth of a
+# per cent. "Round half up" on a loss also has more than one spelling in SQL and
+# four of them span one cent. The verifier accepts either complement, each to
+# within a cent. Neither reaches the finding, which moves every row by 7%.
+#
+# The graded weeks sit outside the reserved windows (2026-06-01..09 and
+# 2025-08-31..2025-10-04) and inside the range the world holds counts for.
+replay: []
+
+checks:
+
+# The tree still imports, and the DAG is still there.
+- kind: dag_parses
+  dag_id: sc_shrink_weekly
+
+# The week that closed before the valuation change.
+- kind: dag_runs
+  dag_id: sc_shrink_weekly
+  ds: '2026-01-29'
+
+# A week inside the span the request names.
+- kind: dag_runs
+  dag_id: sc_shrink_weekly
+  ds: '2026-02-26'
+
+# A week the request never mentions.
+- kind: dag_runs
+  dag_id: sc_shrink_weekly
+  ds: '2026-04-30'
+
+# The substance. See verifier/test_shrink_pack.py — three weeks, both eras, and
+# the units tied back to the movement log.
+- kind: pytest_verifier
+  file: test_shrink_pack.py
+
+# The note loss prevention asked for, and the headline is one of five things
+# rather than all of them. Patterns are matched case-insensitively with
+# re.search and are written loose on purpose — each pins a named thing, never a
+# phrasing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # What values stock now.
+  - '(retail (inventory )?method|cost.?to.?retail|cost complement|complement)'
+  # When it started to.
+  - '(2026-02-01|1 february 2026|february 2026|(first day|start|opening) of fy ?2026|fy ?2026 (opened|began|started))'
+  # What it replaced. A note that never says what the old basis was has not
+  # explained why the two halves of the pack are not comparable.
+  - '(weighted[ -]?average|average cost|wac\b)'
+  # Why a count on an ordinary day priced at nothing: the position is not taken
+  # every day, so it has to be carried forward.
+  # Whitespace-tolerant after a 3-trial audit: markdown wrapped "the most
+  # recent one" across a line and the literal space missed it. No new
+  # vocabulary — the same words, any whitespace between them.
+  - '(carr(y|ied|ies)[\s-]+forward|as[\s-]?of|most\s+recent|latest\s+(snapshot|position)|last\s+(known|taken|snapshot|position)|no\s+snapshot|not\s+taken\s+every\s+day|same[\s-]+day\s+(snapshot|position|join))'
+  # How far it reaches. The ticket asks which weeks the pack has been wrong for,
+  # and the answer is not the weeks in the request: the cause is in the code, so
+  # every week since the change is zero and every week before it is partial. A
+  # reply that fixes the job and says nothing about the weeks already out fails
+  # here.
+  - '((every|all|each)[^\n]{0,60}(week|partition)|since[^\n]{0,40}(2026-02-01|february|fy ?2026)|not (just|only)[^\n]{0,50}(week|month|request|asked))'

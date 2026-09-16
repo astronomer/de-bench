@@ -1,0 +1,15 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/board-pack.md
+model: marts.account_rollup
+consumer: C-1
+owner: finance
+grain: [fiscal_month, entity]
+columns:
+  - {name: fiscal_month, type: string, required: true}
+  - {name: entity, type: string, required: true, accepted_values: [CL-US, CL-GB, CL-IE, CL-DE, CL-MX]}
+  - {name: customer_id, type: string, required: true}
+  - {name: reported_cents, type: bigint, required: true}
+  - {name: active_accounts, type: integer, required: true}
+tests:
+  - unique: [fiscal_month, entity, customer_id]
+  - not_null: [fiscal_month, entity, reported_cents]
+  - no_floats_in: [reported_cents]

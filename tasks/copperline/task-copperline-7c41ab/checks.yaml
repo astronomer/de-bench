@@ -1,0 +1,96 @@
+# Three kinds of day, and the fix has to get all three right.
+#
+#   2026-05-25  all nine markets have feed_expected=false. The ticket names it.
+#   2025-12-25  the same, and the ticket never mentions it: a fix that
+#               special-cases the date the ticket gave fails here.
+#   2026-04-03  BR, CA, DE and GB skip; ID, IE, MX, PL and US send. The
+#               partial day that has to keep working.
+#   2026-03-10  every market sends. The ordinary day.
+#
+# Nothing here holds an authored value. The two closure days are graded by what
+# is NOT on disk, and the two ordinary days by comparison with the tree as it
+# shipped. Both dates sit outside the world's reserved windows.
+#
+# The grading is outcome-only ON PURPOSE. The planted flaw is the trigger
+# rule, and the reference fix changes it — but the ticket states two rules
+# about what publishes, not a mechanism, so a guard inside the build that
+# publishes nothing on a no-feed day passes too. The first run proved this
+# bites: one agent fixed it that way and passed. Fair, because the ticket is
+# the contract; a check pinning trigger_rule would convict an answer the
+# ticket accepts.
+replay: []
+checks:
+- kind: dag_parses
+  dag_id: channel_daily_intake
+
+# The join and the nine loads must still be there. Deleting the join, or
+# swapping the branch for something that always runs, makes the closure-day
+# checks pass for the wrong reason.
+- kind: dag_structure
+  dag_id: channel_daily_intake
+  task_ids:
+  - pick_markets
+  - load_us
+  - load_ca
+  - load_gb
+  - load_ie
+  - load_de
+  - load_br
+  - load_mx
+  - load_pl
+  - load_id
+  - build_channel_daily
+  operators:
+    pick_markets: BranchPythonOperator
+    build_channel_daily: PythonOperator
+
+# The closure day the ticket names: the run stays green AND publishes no file.
+# Green rules out "make the build fail on an empty set"; the absent file rules
+# out the day of zeros.
+- kind: dag_runs
+  dag_id: channel_daily_intake
+  ds: '2026-05-25'
+- kind: file_absent
+  path: include/data/marts/channel_daily_2026-05-25.csv
+
+# The closure day the ticket does not name.
+- kind: dag_runs
+  dag_id: channel_daily_intake
+  ds: '2025-12-25'
+- kind: file_absent
+  path: include/data/marts/channel_daily_2025-12-25.csv
+
+# The partial day still publishes: four markets skip, five send, and the day's
+# file lands with the published grain.
+- kind: dag_runs
+  dag_id: channel_daily_intake
+  ds: '2026-04-03'
+- kind: partition_csv
+  layer: marts
+  name: channel_daily
+  ds: '2026-04-03'
+  columns:
+  - ds
+  - market_code
+  - channel
+  - orders
+  - booked_cents
+
+# What the two ordinary days write must match the tree as it shipped, row for
+# row. This is the guard against fixing the closure day by moving the numbers.
+- kind: unchanged
+  relations:
+  - staging.channel_market
+  - marts.channel_daily
+  run:
+  - channel_daily_intake
+  ds: '2026-03-10'
+  db: include/data/copperline.duckdb
+- kind: unchanged
+  relations:
+  - staging.channel_market
+  - marts.channel_daily
+  run:
+  - channel_daily_intake
+  ds: '2026-04-03'
+  db: include/data/copperline.duckdb

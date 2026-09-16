@@ -1,0 +1,19 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/alerting.md
+# Not a mart schema: this consumer's subject is a list of watched tables, so the
+# schema enumerates the list and enforcement checks that config/alerts.yml holds
+# nothing this file does not name, and that every entry carries an owner.
+consumer: C-10
+owner: growth
+source_of_truth: config/alerts.yml
+subjects:
+  - {table: raw.web_events, owner: growth, kind: volume}
+  - {table: raw.orders, owner: commerce, kind: volume}
+  - {table: raw.pay_meridian_settlements, owner: commerce, kind: freshness}
+  - {table: raw.inventory_snapshots, owner: supply, kind: freshness}
+  - {table: raw.carrier_invoices, owner: supply, kind: freshness}
+  - {table: marts.daily_revenue, owner: finance, kind: volume}
+  - {table: marts.comp_sales_daily, owner: finance, kind: freshness}
+  - {table: marts.gmv_daily, owner: finance, kind: volume}
+tests:
+  - every_subject_has_owner: true
+  - quiet_days_source: ops/calendar/quiet-days.yml

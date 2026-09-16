@@ -1,0 +1,92 @@
+# Per-version idiom table for `author_idiomatic_for_pin` and
+# `provider_incompatibility_flagged`.
+#
+# Two top-level keys:
+#   - `airflow.<version>` describes what's idiomatic when a project is
+#     pinned to that Airflow line.
+#   - `provider.<name>.<major>` describes what's removed/replaced in a
+#     provider major version. A pin matching `<major>.x.x` flags any
+#     listed `removed_symbols` / `removed_kwargs` against the agent's
+#     diagnosis output.
+#
+# Adding a new version or provider is a YAML edit — no Python change.
+
+airflow:
+  "2.9":
+    # `schedule=` was added in AF 2.4 and is the documented forward-
+    # looking name; `schedule_interval=` is the legacy alias still
+    # accepted on 2.x. Mark both as idiomatic on 2.9 so an agent
+    # using either passes the metric — the bench shouldn't punish
+    # an agent that read the latest 2.9 docs and chose the new
+    # name. `airflow.sdk` and `logical_date` remain forbidden
+    # because they're 3.x-only.
+    dag_kwargs_idiomatic: ["schedule_interval", "schedule", "timetable"]
+    dag_kwargs_accepted: ["schedule_interval", "schedule", "timetable"]
+    context_var_idiomatic: ["execution_date", "ds", "ti", "dag", "task"]
+    context_var_forbidden: ["logical_date"]
+    imports_idiomatic: ["airflow.utils.dates", "airflow.operators.python"]
+    imports_forbidden: ["airflow.sdk"]
+
+  "2.10":
+    dag_kwargs_idiomatic: ["schedule_interval", "schedule", "timetable"]
+    dag_kwargs_accepted: ["schedule_interval", "schedule", "timetable"]
+    context_var_idiomatic: ["execution_date", "ds", "ti", "dag", "task"]
+    context_var_forbidden: ["logical_date"]
+    imports_idiomatic: ["airflow.utils.dates", "airflow.operators.python"]
+    imports_forbidden: ["airflow.sdk"]
+
+  "2.11":
+    # 2.11 is the LTS bridge — `schedule=` is preferred but
+    # `schedule_interval=` still works without warning. Agents can
+    # use either.
+    dag_kwargs_idiomatic: ["schedule", "schedule_interval"]
+    dag_kwargs_accepted: ["schedule_interval", "schedule", "timetable"]
+    context_var_idiomatic: ["execution_date", "ds", "ti", "dag", "task"]
+    context_var_forbidden: ["logical_date"]
+    imports_idiomatic: ["airflow.utils.dates", "airflow.operators.python"]
+    imports_forbidden: ["airflow.sdk"]
+
+  "3.0":
+    dag_kwargs_idiomatic: ["schedule"]
+    dag_kwargs_accepted: ["schedule", "timetable"]
+    context_var_idiomatic: ["logical_date", "ds", "ti", "dag", "task"]
+    context_var_forbidden: ["execution_date", "yesterday_ds", "tomorrow_ds"]
+    imports_idiomatic: ["airflow.sdk", "airflow.providers.standard.operators.python"]
+    imports_forbidden: ["airflow.utils.dates", "airflow.operators.python"]
+
+  "3.1":
+    dag_kwargs_idiomatic: ["schedule"]
+    dag_kwargs_accepted: ["schedule", "timetable"]
+    context_var_idiomatic: ["logical_date", "ds", "ti", "dag", "task"]
+    context_var_forbidden: ["execution_date", "yesterday_ds", "tomorrow_ds"]
+    imports_idiomatic: ["airflow.sdk", "airflow.providers.standard.operators.python"]
+    imports_forbidden: ["airflow.utils.dates", "airflow.operators.python"]
+
+  "3.2":
+    dag_kwargs_idiomatic: ["schedule"]
+    dag_kwargs_accepted: ["schedule", "timetable"]
+    context_var_idiomatic: ["logical_date", "ds", "ti", "dag", "task"]
+    context_var_forbidden: ["execution_date", "yesterday_ds", "tomorrow_ds"]
+    imports_idiomatic: ["airflow.sdk", "airflow.providers.standard.operators.python"]
+    imports_forbidden: ["airflow.utils.dates", "airflow.operators.python"]
+
+# Provider-version awareness: removed symbols/kwargs per provider major.
+# Used by `provider_incompatibility_flagged` to compare an agent's
+# diagnosis output (output.json) against the expected flags.
+provider:
+  snowflake:
+    "6":
+      removed_symbols: ["SnowflakeOperator"]
+      replacements:
+        SnowflakeOperator: "SQLExecuteQueryOperator"
+
+  cncf-kubernetes:
+    "10":
+      removed_kwargs:
+        KubernetesPodOperator: ["is_delete_operator_pod"]
+
+  google:
+    "10":
+      removed_symbols: ["BigQueryExecuteQueryOperator"]
+      replacements:
+        BigQueryExecuteQueryOperator: "BigQueryInsertJobOperator"

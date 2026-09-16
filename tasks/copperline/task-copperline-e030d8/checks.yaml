@@ -1,0 +1,99 @@
+# The work is one new builder in the customer project: `marts.repeat_purchase_
+# daily`, one row per consumer channel per day, with the guest population named
+# on the row rather than dropped or invented.
+#
+# The seam is the designed NULL. About a sixth of the orders on the store, web
+# and marketplace channels carry neither a trade account nor a loyalty id
+# (`tools/gen_copperline/upstream/sales.py`: guest checkout, drawn at 16% off
+# the trade channel; measured on the shipped warehouse at 15.9-16.1% per
+# channel and 16.33% over the week the ticket names). Every wrong reading below
+# is that population landing somewhere it does not belong.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.orders` in the same session, and walks the classification in
+# Python rather than in the SQL the answer key uses.
+#
+# WHY NOTHING RUNS A DAG. The world ships the landed half of the warehouse
+# (AGENTS.md, "The warehouse"): every `marts.*` model is derived and none is on
+# disk. The ticket asks for a builder and says there is no DAG yet, so there is
+# nothing to replay — the verifier calls `build_daily` directly, which grades
+# the same code in seconds. It also removes the shortcut: a day typed into the
+# table by hand is a day the next build replaces.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no builder      verifier: the three days
+#   the first-order table joined with an INNER join  verifier: `order_count`,
+#     (a guest has no key, so 16% of the day goes)   and the adds-up test
+#   guests folded onto one identity — `coalesce(     verifier: `guest_orders`,
+#     loyalty_id, 'GUEST-' || market_code)`, which     `member_orders`,
+#     `int_customer_lifecycle` really does use for     `repeat_member_orders`,
+#     the party grain                                  `distinct_members`
+#   guests given an identity each, one per order     verifier: `guest_orders`,
+#     (every guest order becomes a first-time buyer)   `new_member_orders`
+#   the first order looked up inside the day, or     verifier: `new_` and
+#     inside the week being rebuilt                    `repeat_member_orders`
+#   the first-order lookup taken over the unfiltered verifier: the three days
+#     feed while the day is filtered (they differ by   (1-2 orders a channel,
+#     the test and soft-deleted rows)                  graded exactly, and the
+#                                                      ticket states the rule)
+#   the cancelled orders dropped from the day        verifier: `order_count`
+#     (284 of 3,413 on 2026-03-11), when the ticket    and every column under
+#     says every order the channel took                it
+#   the staging filters never applied at all          verifier: same
+#     (26 test and 7 soft-deleted on 2026-03-11)
+#   the share divided by the day's orders            verifier: the bps column,
+#                                                      ~1,500 bps away
+#   the trade channel left in the population         verifier: the channel test
+#   the day appended rather than replaced            verifier: rebuild test
+#   the table emptied before each build              verifier: other-days test
+#   the build special-cased to the ticket's week     verifier: 2025-09-17 and
+#                                                      2026-05-06
+#   the module or the tree broken                    dag_parses
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES, and is meant to. The ticket calls the
+# identity "the account on the order" without naming a column. Off the trade
+# channel `raw.orders.customer_ref` is null on every row, so
+# `coalesce(customer_ref, loyalty_id)` and `loyalty_id` are the same key over
+# this population and both readings grade identical. So does a build that
+# writes the page in dbt or in SQL rather than in the module, as long as
+# `projects/customer/lib/repeat.py` still exposes `build_daily`.
+#
+# The graded days are 2026-03-11, 2025-09-17 and 2026-05-06. The ticket names a
+# week and none of the three by name. All three sit outside the era boundaries
+# and outside the three days every market is shut, so all three carry orders on
+# all three channels — the verifier's first test re-measures that every run.
+replay: []
+
+checks:
+
+# The tree still imports and the DAG bag is still clean. The ticket adds a
+# module to a project whose DAGs import from it, so a module that does not
+# import takes the customer project's DAGs down with it.
+- kind: dag_parses
+  dag_id: cus_customer_360_daily
+
+# The substance. See verifier/test_outputs.py — three days, the two identities
+# the ticket states, the population, and a rebuild.
+- kind: pytest_verifier
+  file: test_outputs.py
+
+# The footnote the pack asked for. Three facts, each pinning a figure or a
+# named thing rather than a phrasing; matched case-insensitively with
+# re.search.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The share of the week's orders with no account. The band is 14-18 per cent:
+  # measured on the shipped warehouse, the guest share of a consumer-channel
+  # day runs 14.09% to 17.73% over FY2025-FY2026, and the week the ticket names
+  # is 16.33%. Taken over every channel, trade included, the same week is
+  # 15.4%, so that reading lands in the band too.
+  # Anchored to the population it measures: a bare 14-18% matched any such
+  # figure anywhere in the page, a revenue share included.
+  - '((guest|no[- ]account|accountless|anonymous|without (an )?account)[^\n]{0,120}\b1[4-8](\.\d+)?\s*(%|per ?cent)|\b1[4-8](\.\d+)?\s*(%|per ?cent)[^\n]{0,120}(guest|no[- ]account|accountless|anonymous))'
+  # The denominator, named. The whole ticket.
+  - 'member[_ ]?orders?'
+  # The two columns a guest order reaches, and no third.
+  - 'guest_orders'
+  - 'order_count'

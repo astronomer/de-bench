@@ -1,0 +1,53 @@
+schema_version: 1
+name: copperline
+description: >
+  A home, hardware and outdoor-living retailer: 268 stores in five countries,
+  a web shop, a marketplace, and ~4,000 trade accounts on terms. The data
+  platform of an eleven-person team, carrying the seams of an acquisition, a
+  processor migration and a UTC cutover nobody had time to clean up.
+
+# The warehouse and landing tree are generated data; nothing under
+# workspace/ holds it. The three inputs live beside workspace/ and never
+# ship — see docs/authoring.md, "Generated data". baked: the full-profile
+# build runs once at Modal image build (a config change rebuilds the image
+# automatically) and trials copy the artifacts in via workspace_data; the
+# container refuses an image whose bake sha disagrees with this config.
+generated:
+  generator: tools/gen_copperline
+  timeline: timeline.yaml
+  planted: planted.yaml
+  baked: true
+
+# No default replay: with 105 DAGs, "replay everything" (the absent-key
+# meaning) would run the whole platform before grading every task. Each
+# task's checks.yaml names the DAGs its focus DAG actually reads, via
+# `replay:`.
+seed_defaults: []
+
+task_defaults:
+  max_wall_seconds: 1800
+  # The floor under every task's own list: the read-only estate. No dbt/** here
+  # on purpose — test triage and seed tasks legitimately edit that tree.
+  do_not_modify:
+    - fixtures/**
+    - legacy/**
+    - include/lib/**
+    - CONVENTIONS.md
+
+runtime:
+  image: copperline
+  workspace_data:
+    - {from: /opt/copperline/copperline.duckdb, to: include/data/copperline.duckdb}
+    # The frozen nwv namespace. The generator writes it beside the warehouse
+    # it is given, so the bake produces it without being told to, and
+    # include/lib/warehouse.py attaches it from the same directory.
+    - {from: /opt/copperline/northwave.duckdb, to: include/data/northwave.duckdb}
+    - {from: /opt/copperline/landing, to: landing}
+    # dbt-utils, resolved at image build — a trial has no network for dbt deps.
+    - {from: /opt/copperline/dbt_packages, to: dbt/copperline_analytics/dbt_packages}
+  env:
+    DUCKDB_PATH: include/data/copperline.duckdb
+    WORLD_TODAY: "2026-06-15"
+  system_prompt_text: >
+    You are a data engineer at Copperline, a home, hardware and outdoor-living
+    retailer. You work in the data platform monorepo.

@@ -1,0 +1,224 @@
+# Tests on the intermediate layer.
+#
+# QC-1: an intermediate model tests that its grain is what it claims, that its
+# joins do not fan out, and that the keys it references exist. It does not test
+# totals — a total is a mart's business rule and belongs to a contract.
+#
+# The relationships tests QC-2 moved off staging live here.
+
+version: 2
+
+models:
+
+  - name: int_order_lines_discounted
+    description: The header discount allocated to the line, largest remainder.
+    tests:
+      - dbt_utils.fewer_rows_than:
+          compare_model: ref('stg_sales__order_lines')
+    columns:
+      - name: order_line_key
+        tests: [unique, not_null]
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_sales__orders')
+              field: order_id
+      - name: header_discount_cents
+        tests: [not_null]
+      - name: discounted_line_cents
+        tests: [not_null]
+
+  - name: int_order_lines_costed
+    description: Landed unit cost at the order date.
+    tests:
+      - dbt_utils.equal_rowcount:
+          compare_model: ref('int_order_lines_discounted')
+    columns:
+      - name: order_line_key
+        tests: [unique, not_null]
+      - name: order_id
+        tests: [not_null]
+
+  - name: int_net_sales_lines
+    description: >
+      Net sales at order-line grain. Four teams read it; the grain is the whole
+      definition.
+    tests:
+      - dbt_utils.equal_rowcount:
+          compare_model: ref('int_order_lines_discounted')
+    columns:
+      - name: order_line_key
+        tests: [unique, not_null]
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_sales__orders')
+              field: order_id
+      - name: net_sales_cents
+        tests: [not_null]
+      - name: returned_cents
+        tests: [not_null]
+      - name: channel
+        tests:
+          - accepted_values:
+              values: ['store', 'web', 'marketplace', 'trade']
+
+  - name: int_orders_enriched
+    description: Header, lines and payment, one row per order.
+    tests:
+      - dbt_utils.equal_rowcount:
+          compare_model: ref('stg_sales__orders')
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: currency_code
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_currency')
+              field: currency_code
+      - name: fx_rate_ppm
+        tests: [not_null]
+      - name: booked_cents
+        tests: [not_null]
+      - name: market_code
+        tests:
+          - relationships:
+              to: ref('dim_geography')
+              field: market_code
+
+  - name: int_customer_resolved
+    description: Every customer reference, resolved to one account key.
+    columns:
+      - name: party_ref
+        tests: [unique, not_null]
+      - name: customer_key
+        tests: [not_null]
+      - name: ref_shape
+        tests:
+          - accepted_values:
+              values: ['current', 'legacy', 'northwave']
+
+  - name: int_customer_lifecycle
+    description: >
+      One row per party. Guests are a row per market, not a gap, and a guest
+      row is empty on every column that describes one customer's history —
+      docs/semantic-definitions.md §SD-3.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [party_key, party_kind]
+    columns:
+      - name: party_key
+        tests: [unique, not_null]
+      - name: party_kind
+        tests:
+          - accepted_values:
+              values: ['trade', 'loyalty', 'guest']
+      - name: first_order_date
+        tests:
+          # A guest bucket has no first order — §SD-3 — so the assertion is
+          # scoped to the parties it is still true of rather than dropped.
+          - not_null:
+              config:
+                where: "party_kind <> 'guest'"
+      - name: orders_lifetime
+        tests: [not_null]
+
+  - name: int_sessions_funnel
+    description: One row per session, with the highest rung it reached.
+    columns:
+      - name: session_id
+        tests: [unique, not_null]
+      - name: funnel_stage
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+              quote: false
+      - name: funnel_stage_name
+        tests:
+          - accepted_values:
+              values: ['visit', 'product', 'cart', 'checkout', 'purchase']
+
+  - name: int_shipment_milestones
+    description: One row per shipment; delivered when the last package is.
+    tests:
+      - dbt_utils.equal_rowcount:
+          compare_model: ref('stg_logistics__shipments')
+    columns:
+      - name: shipment_id
+        tests: [unique, not_null]
+      - name: carrier_code
+        tests: [not_null]
+      - name: total_freight_cents
+        tests: [not_null]
+
+  - name: int_inventory_position_daily
+    description: Daily position, snapshot authoritative, replay beside it.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku, location_id]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: sku
+        tests: [not_null]
+      - name: location_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_warehouse')
+              field: location_id
+      - name: on_hand_units
+        tests: [not_null]
+
+  - name: int_promo_exposure
+    description: Eligible against discounted, over the retention window.
+    columns:
+      - name: promo_exposure_key
+        tests: [unique, not_null]
+      - name: promo_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_sales__promotions')
+              field: promo_id
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_sales__orders')
+              field: order_id
+
+  - name: int_gl_postings_unified
+    description: >
+      Five subledgers, one shape. Debits positive, credits negative; a balanced
+      document sums to zero.
+    columns:
+      - name: posting_key
+        tests: [unique, not_null]
+      - name: subledger
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ar_invoice', 'ar_credit', 'gift_card', 'marketplace', 'card']
+      - name: account_code
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_account')
+              field: account_code
+      - name: side
+        tests:
+          - accepted_values:
+              values: ['debit', 'credit']
+      - name: entity_code
+        tests: [not_null]
+      - name: signed_amount_cents
+        tests: [not_null]
+      - name: fx_rate_ppm
+        tests: [not_null]
+      - name: posting_date
+        tests: [not_null]

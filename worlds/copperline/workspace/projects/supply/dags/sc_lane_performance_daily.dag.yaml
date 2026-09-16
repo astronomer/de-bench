@@ -1,0 +1,54 @@
+dag_id: sc_lane_performance_daily
+schedule: "0 6 * * *"
+description: on-time and dwell by lane, per carrier
+default_args:
+  owner: supply
+  retries: 2
+tags: [supply, mart, carriers]
+steps:
+  # One rollup per carrier, because a carrier whose scan feed is late should not
+  # take the other two down with it. Each writes its own rows of the same
+  # target, scoped to the day, so the three cannot race.
+  wait_for_scans:
+    blueprint: sensor_wait
+    asset: raw.carrier_scans
+    partition_col: scan_date
+    timeout: 10800
+    poke_interval: 300
+  dwell_brfr:
+    blueprint: rollup
+    depends_on: [wait_for_scans]
+    source: marts.int_scan_normalized
+    group_by: [lane_id]
+    agg: median
+    column: dwell_minutes
+    as: dwell_minutes
+    target: marts.lane_performance_daily
+    where: "carrier_code = 'BRFR'"
+  dwell_plpc:
+    blueprint: rollup
+    depends_on: [wait_for_scans]
+    source: marts.int_scan_normalized
+    group_by: [lane_id]
+    agg: median
+    column: dwell_minutes
+    as: dwell_minutes
+    target: marts.lane_performance_daily
+    where: "carrier_code = 'PLPC'"
+  dwell_mwlg:
+    blueprint: rollup
+    depends_on: [wait_for_scans]
+    source: marts.int_scan_normalized
+    group_by: [lane_id]
+    agg: median
+    column: dwell_minutes
+    as: dwell_minutes
+    target: marts.lane_performance_daily
+    where: "carrier_code = 'MWLG'"
+  export:
+    blueprint: partition_export
+    depends_on: [dwell_brfr, dwell_plpc, dwell_mwlg]
+    source: marts.lane_performance_daily
+    layer: marts
+    name: lane_performance
+    order_by: [lane_id]

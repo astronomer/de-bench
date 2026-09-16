@@ -1,0 +1,48 @@
+# The weekly survey rollup: promoters, passives and detractors by segment.
+#
+# The survey tool drops a week's responses on Friday morning. Three steps,
+# because that is all it is: land the file, build the mart, publish it.
+# `docs/blueprints.md` says a DAG whose shape is its own is better
+# hand-written; this one's shape is not its own.
+#
+# It runs on Friday at 10:00 and owns the week that ended the day before.
+dag_id: cus_nps_weekly
+schedule: "0 10 * * 5"
+description: weekly NPS rollup from the survey drop
+start_date: 2026-01-05
+tags: [customer, nps, mart, blueprint]
+default_args:
+  owner: customer
+  retries: 2
+
+steps:
+  land_responses:
+    blueprint: csv_intake
+    source: "crm/dt={{ macros.ds_add(ds, -1) }}/nps_responses.csv"
+    table: raw.nps_responses
+    mode: replace
+    partition_col: week_ending
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    columns:
+      week_ending: DATE
+      response_id: VARCHAR
+      customer_id: VARCHAR
+      source_book: VARCHAR
+      score: INTEGER
+      comment_present: BOOLEAN
+
+  build_nps:
+    blueprint: dbt_select
+    depends_on: [land_responses]
+    select: nps_weekly
+    vars:
+      week_ending: "{{ macros.ds_add(ds, -1) }}"
+
+  publish_nps:
+    blueprint: partition_export
+    depends_on: [build_nps]
+    source: marts.nps_weekly
+    name: nps
+    partition_col: week_ending
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [segment]

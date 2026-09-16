@@ -1,0 +1,22 @@
+cron_pipeline:
+  default_args:
+    start_date: 2025-01-01
+  timetable:
+    callable: airflow.timetables.trigger.CronTriggerTimetable
+    params:
+      cron: "0 1 * * 3"
+      timezone: UTC
+  tasks:
+    run:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo cron_run
+
+dataset_join_pipeline:
+  schedule_interval:
+    !join:
+      - "s3://datasets/orders.parquet"
+      - "s3://datasets/inventory.parquet"
+  tasks:
+    join:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo join

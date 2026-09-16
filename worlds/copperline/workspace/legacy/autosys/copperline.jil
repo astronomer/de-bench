@@ -1,0 +1,726 @@
+/* ===================================================================== */
+/*  Copperline nightly, AutoSys R11.3.6                                  */
+/*  autorep -J cpl.% -q  >  copperline.jil                               */
+/*  exported 12/18/2025 13:58 from CPLSCHED01 by dwops                   */
+/*                                                                       */
+/*  BUSDATE is set in /opt/cpl/etc/nightly.profile. It is yesterday in    */
+/*  yyyy-mm-dd, which is the format the Pentaho job wants.                */
+/*                                                                       */
+/*  Calendar retail_2026 is in calendars/retail_2026.cal. Load it with    */
+/*  autocal_asc -i before you apply this file, or the boxes that name it  */
+/*  will not start.                                                       */
+/* ===================================================================== */
+
+
+/* ---- wave 1. cut over 2026-01-05, these run in Airflow now. ---- */
+/* ---- left here so the next wave can see what came out. KD  ---- */
+
+delete_job: cpl.nightly_supplier_master
+delete_job: cpl.nightly_inventory_report
+delete_job: cpl.nightly_dc_transfer
+delete_job: cpl.nightly_shrink_weekly
+delete_job: cpl.nightly_lane_performance
+delete_job: cpl.nightly_backorder
+delete_job: cpl.nightly_dc_capacity
+delete_job: cpl.nightly_scorecard
+delete_job: cpl.nightly_fill_rate
+
+
+/* ===================================================================== */
+/*  the window                                                           */
+/* ===================================================================== */
+
+insert_job: cpl.nightly   job_type: b
+owner: dwops@cplsched01
+permission: gx,ge,wx,we
+date_conditions: 1
+days_of_week: all
+start_times: "01:00"
+description: "Copperline nightly window"
+alarm_if_fail: 1
+max_run_alarm: 300
+
+insert_job: cpl.nightly.stage   job_type: b
+box_name: cpl.nightly
+owner: dwops@cplsched01
+permission: gx,ge
+description: "land the night's files and extracts"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly.load   job_type: b
+box_name: cpl.nightly
+condition: s(cpl.nightly.stage)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "the Pentaho jobs"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly.recon   job_type: b
+box_name: cpl.nightly
+condition: s(cpl.nightly.load)
+owner: dwops@cplsched01
+permission: gx,ge
+run_calendar: retail_2026
+description: "tie outs. trading days only, finance do not read them at the weekend"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly.dist   job_type: b
+box_name: cpl.nightly
+condition: s(cpl.nightly.recon)
+owner: dwops@cplsched01
+permission: gx,ge
+run_calendar: retail_2026
+description: "packs out to the shares"
+alarm_if_fail: 1
+
+
+/* ===================================================================== */
+/*  staging                                                              */
+/* ===================================================================== */
+
+insert_job: cpl.stage.pos   job_type: b
+box_name: cpl.nightly.stage
+owner: dwops@cplsched01
+permission: gx,ge
+description: "store batches"
+alarm_if_fail: 1
+
+insert_job: cpl.stage.pos.watch   job_type: f
+box_name: cpl.stage.pos
+machine: cplbatch01
+owner: dwops@cplbatch01
+watch_file: /data/landing/pos/pos_batch_${BUSDATE}.trg
+watch_interval: 60
+term_run_time: 210
+description: "the last store closes 23:05 local. Hawaii is the long pole."
+
+insert_job: cpl.stage.pos.batch   job_type: c
+box_name: cpl.stage.pos
+condition: s(cpl.stage.pos.watch)
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/stage_pos.sh -d ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 45
+n_retrys: 2
+
+insert_job: cpl.stage.wms   job_type: b
+box_name: cpl.nightly.stage
+owner: dwops@cplsched01
+permission: gx,ge
+description: "warehouse movements"
+alarm_if_fail: 1
+
+insert_job: cpl.stage.wms.movements   job_type: c
+box_name: cpl.stage.wms
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/stage_wms.sh movements ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 60
+n_retrys: 1
+
+insert_job: cpl.stage.erp   job_type: b
+box_name: cpl.nightly.stage
+owner: dwops@cplsched01
+permission: gx,ge
+description: "ERP pulls"
+alarm_if_fail: 1
+
+insert_job: cpl.stage.erp.gl   job_type: c
+box_name: cpl.stage.erp
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/stage_erp.sh gl ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 90
+
+insert_job: cpl.stage.files   job_type: b
+box_name: cpl.nightly.stage
+owner: dwops@cplsched01
+permission: gx,ge
+description: "whatever arrives on the interface share"
+alarm_if_fail: 1
+
+insert_job: cpl.stage.files.supplier   job_type: f
+box_name: cpl.stage.files
+machine: cplbatch01
+owner: dwops@cplbatch01
+watch_file: /mnt/interfaces/out/supplier_master_${BUSDATE}.csv
+watch_interval: 120
+term_run_time: 90
+description: "the SSIS package drops this about 00:40"
+
+insert_job: cpl.stage.files.freight   job_type: c
+box_name: cpl.stage.files
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/stage_freight.sh ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 30
+
+
+/* ===================================================================== */
+/*  the load. one box per job, one kitchen call inside it.               */
+/* ===================================================================== */
+
+insert_job: cpl.nightly_store_sales   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.pos.batch)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "pos.sales_header"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_store_sales.run   job_type: c
+box_name: cpl.nightly_store_sales
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_store_sales -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 70
+
+insert_job: cpl.nightly_price_change   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.erp.gl)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "product.prices"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_price_change.run   job_type: c
+box_name: cpl.nightly_price_change
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_price_change -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 40
+
+insert_job: cpl.nightly_markdown   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.nightly_price_change)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "product.markdowns. after prices, they read the same version table."
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_markdown.run   job_type: c
+box_name: cpl.nightly_markdown
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_markdown -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 40
+
+insert_job: cpl.nightly_promo_calendar   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.erp.gl)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "product.promotions"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_promo_calendar.run   job_type: c
+box_name: cpl.nightly_promo_calendar
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_promo_calendar -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 35
+
+insert_job: cpl.nightly_stock_ledger   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.wms.movements)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "inventory.stock_ledger. the long one, budget an hour."
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_stock_ledger.run   job_type: c
+box_name: cpl.nightly_stock_ledger
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_stock_ledger -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 120
+
+insert_job: cpl.nightly_stock_ledger.check   job_type: c
+box_name: cpl.nightly_stock_ledger
+condition: s(cpl.nightly_stock_ledger.run)
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/check_load.sh nightly_stock_ledger ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 10
+
+insert_job: cpl.nightly_vendor_returns   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.wms.movements)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "inventory.rtv"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_vendor_returns.run   job_type: c
+box_name: cpl.nightly_vendor_returns
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_vendor_returns -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 30
+
+insert_job: cpl.nightly_receipts   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.wms.movements) & s(cpl.stage.files.supplier)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "supply_chain.receipts"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_receipts.run   job_type: c
+box_name: cpl.nightly_receipts
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_receipts -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 50
+
+insert_job: cpl.nightly_purchase_orders   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.erp.gl) & s(cpl.stage.files.supplier)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "supply_chain.purchase_orders"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_purchase_orders.run   job_type: c
+box_name: cpl.nightly_purchase_orders
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_purchase_orders -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 45
+
+insert_job: cpl.nightly_gl_extract   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.nightly_store_sales) & s(cpl.nightly_receipts)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "finance.journal_lines. do not start before sales and receipts are in."
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_gl_extract.run   job_type: c
+box_name: cpl.nightly_gl_extract
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_gl_extract -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 80
+
+insert_job: cpl.nightly_gl_extract.check   job_type: c
+box_name: cpl.nightly_gl_extract
+condition: s(cpl.nightly_gl_extract.run)
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/check_load.sh nightly_gl_extract ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 10
+
+insert_job: cpl.nightly_ar_aging   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.nightly_gl_extract)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "finance.ar_invoices"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_ar_aging.run   job_type: c
+box_name: cpl.nightly_ar_aging
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_ar_aging -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 40
+
+insert_job: cpl.nightly_ar_aging.check   job_type: c
+box_name: cpl.nightly_ar_aging
+condition: s(cpl.nightly_ar_aging.run)
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/check_load.sh nightly_ar_aging ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 10
+
+insert_job: cpl.nightly_customer_master   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.erp.gl)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "customer.customers"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_customer_master.run   job_type: c
+box_name: cpl.nightly_customer_master
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_customer_master -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 45
+
+insert_job: cpl.nightly_freight_accrual   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.stage.files.freight)
+owner: dwops@cplsched01
+permission: gx,ge
+description: "logistics.freight"
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_freight_accrual.run   job_type: c
+box_name: cpl.nightly_freight_accrual
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_freight_accrual -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 35
+
+insert_job: cpl.nightly_freight_accrual.check   job_type: c
+box_name: cpl.nightly_freight_accrual
+condition: s(cpl.nightly_freight_accrual.run)
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/check_load.sh nightly_freight_accrual ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 10
+
+insert_job: cpl.nightly_store_targets   job_type: b
+box_name: cpl.nightly.load
+condition: s(cpl.nightly_store_sales)
+owner: dwops@cplsched01
+permission: gx,ge
+date_conditions: 1
+days_of_week: su
+start_times: "02:30"
+description: "store.targets. weekly, Sunday night for the week that just ended."
+alarm_if_fail: 1
+
+insert_job: cpl.nightly_store_targets.run   job_type: c
+box_name: cpl.nightly_store_targets
+machine: cplpdi01
+owner: pdiuser@cplpdi01
+permission: gx,ge
+command: /opt/pdi/kitchen.sh -file=/opt/cpl/legacy/pdi/nightly_load.kjb -level=Basic -param:JOB_NAME=nightly_store_targets -param:BUSINESS_DATE=${BUSDATE}
+profile: /opt/cpl/etc/nightly.profile
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 25
+
+
+/* ===================================================================== */
+/*  recon                                                                */
+/* ===================================================================== */
+
+insert_job: cpl.recon.stock   job_type: b
+box_name: cpl.nightly.recon
+condition: s(cpl.nightly_stock_ledger)
+owner: dwops@cplsched01
+permission: gx,ge
+alarm_if_fail: 1
+
+insert_job: cpl.recon.stock.tie   job_type: c
+box_name: cpl.recon.stock
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/recon.sh stock ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 20
+
+insert_job: cpl.recon.gl   job_type: b
+box_name: cpl.nightly.recon
+condition: s(cpl.nightly_gl_extract) & s(cpl.nightly_ar_aging)
+owner: dwops@cplsched01
+permission: gx,ge
+run_calendar: retail_2026
+alarm_if_fail: 1
+
+insert_job: cpl.recon.gl.tie   job_type: c
+box_name: cpl.recon.gl
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/recon.sh gl ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 25
+
+insert_job: cpl.recon.freight   job_type: b
+box_name: cpl.nightly.recon
+condition: s(cpl.nightly_freight_accrual)
+owner: dwops@cplsched01
+permission: gx,ge
+alarm_if_fail: 1
+
+insert_job: cpl.recon.freight.tie   job_type: c
+box_name: cpl.recon.freight
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/recon.sh freight ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 15
+
+
+/* ===================================================================== */
+/*  distribution                                                         */
+/* ===================================================================== */
+
+insert_job: cpl.dist.stores   job_type: b
+box_name: cpl.nightly.dist
+owner: dwops@cplsched01
+permission: gx,ge
+run_calendar: retail_2026
+description: "store pack. 268 files, one per store."
+alarm_if_fail: 1
+
+insert_job: cpl.dist.stores.pack   job_type: c
+box_name: cpl.dist.stores
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/pack.sh stores ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 40
+
+insert_job: cpl.dist.stores.send   job_type: c
+box_name: cpl.dist.stores
+condition: s(cpl.dist.stores.pack)
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/send.sh stores ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 30
+n_retrys: 3
+
+insert_job: cpl.dist.merch   job_type: b
+box_name: cpl.nightly.dist
+owner: dwops@cplsched01
+permission: gx,ge
+run_calendar: retail_2026
+alarm_if_fail: 1
+
+insert_job: cpl.dist.merch.pack   job_type: c
+box_name: cpl.dist.merch
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/pack.sh merch ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 20
+
+insert_job: cpl.dist.finance   job_type: b
+box_name: cpl.nightly.dist
+condition: s(cpl.recon.gl)
+owner: dwops@cplsched01
+permission: gx,ge
+run_calendar: retail_2026
+alarm_if_fail: 1
+
+insert_job: cpl.dist.finance.pack   job_type: c
+box_name: cpl.dist.finance
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/pack.sh finance ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 20
+
+
+/* ===================================================================== */
+/*  weekly and month end. own windows, not in cpl.nightly.               */
+/* ===================================================================== */
+
+insert_job: cpl.weekly   job_type: b
+owner: dwops@cplsched01
+permission: gx,ge,wx,we
+date_conditions: 1
+days_of_week: mo
+start_times: "05:00"
+description: "Monday morning, after Sunday night's load"
+alarm_if_fail: 1
+
+insert_job: cpl.weekly.targets   job_type: b
+box_name: cpl.weekly
+condition: s(cpl.nightly_store_targets)
+owner: dwops@cplsched01
+permission: gx,ge
+alarm_if_fail: 1
+
+insert_job: cpl.weekly.targets.dist   job_type: c
+box_name: cpl.weekly.targets
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/pack.sh targets ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 20
+
+insert_job: cpl.month_end   job_type: b
+owner: dwops@cplsched01
+permission: gx,ge,wx,we
+date_conditions: 1
+run_calendar: retail_2026
+start_times: "06:00"
+description: "fifth business day. somebody starts it by hand, the calendar only keeps it off holidays."
+alarm_if_fail: 1
+
+insert_job: cpl.month_end.gl_close   job_type: b
+box_name: cpl.month_end
+owner: dwops@cplsched01
+permission: gx,ge
+run_calendar: retail_2026
+alarm_if_fail: 1
+
+insert_job: cpl.month_end.gl_close.run   job_type: c
+box_name: cpl.month_end.gl_close
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/gl_close.sh ${BUSDATE}
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 1
+max_run_alarm: 120
+
+
+/* ===================================================================== */
+/*  housekeeping                                                         */
+/* ===================================================================== */
+
+insert_job: cpl.util   job_type: b
+owner: dwops@cplsched01
+permission: gx,ge,wx,we
+date_conditions: 1
+days_of_week: su
+start_times: "04:00"
+alarm_if_fail: 0
+
+insert_job: cpl.util.purge   job_type: b
+box_name: cpl.util
+owner: dwops@cplsched01
+permission: gx,ge
+alarm_if_fail: 0
+
+insert_job: cpl.util.purge.stage   job_type: c
+box_name: cpl.util.purge
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+command: /opt/cpl/bin/purge_stage.sh 90
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 0
+max_run_alarm: 60
+
+insert_job: cpl.util.archive.logs   job_type: c
+box_name: cpl.util.purge
+machine: cplbatch01
+owner: dwops@cplbatch01
+permission: gx,ge
+run_calendar: retail_2025
+status: OI
+command: /opt/cpl/bin/archive_logs.sh
+std_out_file: /var/log/autosys/$AUTO_JOB_NAME.out
+std_err_file: /var/log/autosys/$AUTO_JOB_NAME.err
+alarm_if_fail: 0
+max_run_alarm: 45
+
+/* end of export */

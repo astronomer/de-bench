@@ -1,0 +1,58 @@
+# The freight accrual, read from supply-chain's monthly mart.
+#
+# `marts.freight_accrual_monthly` is built by supply-chain and read here. It is
+# one of the few places a finance DAG reads another team's mart, and it is done
+# this way because the accrual is a freight number that finance books rather
+# than a finance number that freight informs.
+#
+# `docs/memos/fy26-cost-restatement.md` §MEMO-1 governs what the cost means:
+# `freight_cost` in the analyst's workbook is GROSS of the fuel surcharge
+# before the FY2026 boundary and NET of it after. §MEMO-2 says prior periods
+# are not restated, so a year-on-year comparison across that boundary compares
+# two different measures unless the reader adjusts. This DAG books the number
+# as the mart states it and does not adjust anything.
+
+dag_id: fin_accrual_freight
+schedule: "0 9 * * *"
+description: book the freight accrual from supply's monthly mart
+tags: [finance, accrual, freight]
+
+default_args:
+  owner: finance
+  retries: 2
+
+steps:
+  wait_for_accrual:
+    blueprint: sensor_wait
+    asset: marts.freight_accrual_monthly
+    partition_col: fiscal_month
+    partition_value: "{{ macros.ds_format(macros.ds_add(ds, -1), '%Y-%m-%d', '%Y-%m') }}"
+    poke_interval: 600
+    timeout: 14400
+    mode: reschedule
+
+  build:
+    blueprint: dbt_select
+    depends_on: [wait_for_accrual]
+    command: run
+    select: "marts.accrual_freight_daily"
+    target: prod
+    vars:
+      run_date: "{{ macros.ds_add(ds, -1) }}"
+
+  check:
+    blueprint: cents_check
+    depends_on: [build]
+    table: marts.accrual_freight_daily
+    columns: [accrual_cents, reversal_cents]
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    at_least: 1
+
+  publish:
+    blueprint: partition_export
+    depends_on: [check]
+    source: marts.accrual_freight_daily
+    layer: marts
+    name: accrual_freight_daily
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [entity, carrier_code]

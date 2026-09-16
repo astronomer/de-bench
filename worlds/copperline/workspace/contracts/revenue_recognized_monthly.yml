@@ -1,0 +1,15 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/finance-close.md
+model: marts.revenue_recognized_monthly
+consumer: C-2
+owner: finance
+grain: [fiscal_month, entity]
+columns:
+  - {name: fiscal_month, type: string, required: true}
+  - {name: entity, type: string, required: true, accepted_values: [CL-US, CL-GB, CL-IE, CL-DE, CL-MX]}
+  - {name: recognized_cents, type: bigint, required: true}
+  - {name: ledger_amount_cents, type: bigint, required: false}
+  - {name: is_closed, type: boolean, required: true}
+tests:
+  - unique: [fiscal_month, entity]
+  - not_null: [fiscal_month, entity, recognized_cents, is_closed]
+  - no_floats_in: [recognized_cents, ledger_amount_cents]

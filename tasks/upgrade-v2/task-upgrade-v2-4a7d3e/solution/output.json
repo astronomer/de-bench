@@ -1,0 +1,4 @@
+{
+  "providers": {"snowflake": "6"},
+  "notes": "snowflake 6.x requires apache-airflow>=2.9; AF 2.11.0 admits it (last known release 6.12.1)."
+}

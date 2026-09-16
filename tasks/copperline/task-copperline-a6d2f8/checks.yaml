@@ -1,0 +1,204 @@
+# The ticket has a one-line code half and a six-figure reading half, and they
+# are graded apart.
+#
+# THE CODE HALF. `sc_autosys_bridge.trigger_nightly` hands the runner
+# `variables={"BUSDATE": ds}`.
+#
+#   legacy/autosys/copperline.jil   the header says `BUSDATE` "is yesterday in
+#                     yyyy-mm-dd, which is the format the Pentaho job wants".
+#   ops.load_control  the same fact, from the data rather than a comment:
+#                     `started_at` falls in the 01:00 hour of `business_date +
+#                     1` on all 15,577 rows, with no exception on either side
+#                     of the cutover.
+#   CONVENTIONS.md    under a trigger timetable `{{ ds }}` is the day the run
+#                     FIRES, and a daily job that owns the day before names
+#                     `TARGET_DS = "{{ macros.ds_add(ds, -1) }}"` at the top of
+#                     the file.
+#
+# So the bridge has been telling the estate to work a night that has not
+# closed. Nothing here runs the DAG: `trigger_nightly` shells `ssh` to a box
+# that is not in the container, so a `dag_runs` check would be red whatever
+# `BUSDATE` says and would grade the network. There is no `unchanged` check
+# either — the bridge writes no relation, so a differential over it could not
+# fail, and a check that cannot fail is worse than no check.
+#
+# THE READING HALF. Six figures, every one of them derived, and the ticket asks
+# for each in as many words:
+#
+#   15,577 and none   the control table's own witness. `SELECT count(*)` and
+#                     `count(*) WHERE started_at::DATE <> business_date + 1`.
+#   161               distinct business dates in `ops.load_control` from the
+#                     cutover on 2026-01-05 to 2026-06-14, the last date the
+#                     table holds. Every one of those nights named the wrong
+#                     business date.
+#   112               of those 161 nights that `retail_2026` names, which is
+#                     the same count `raw.market_calendar` gives for `US`. The
+#                     calendared boxes are the tie-outs and the packs, so those
+#                     are the nights the error reached finance.
+#   23 = 20 + 3       business dates the tie-outs should have carried and never
+#                     did: {T-1 : T a calendar night} minus {T}. Twenty Sundays
+#                     and the three Mondays the calendar leaves out
+#                     (2026-01-19, 2026-02-16, 2026-05-25).
+#   23 Fridays        the mirror: {T} minus {T-1 : T a calendar night},
+#                     2026-01-09 to 2026-06-12. Under the old profile a Friday
+#                     was tied out on the Saturday and Saturday is not a
+#                     calendar day, so a Friday tie-out never existed. Finance
+#                     have had one every week since January.
+#   check_jobs_wrote  why nothing has gone red: the step that asks and the step
+#                     that checks have been out by the same day, so the log has
+#                     agreed with itself.
+#
+# What the battery convicts, by wrong answer:
+#
+#   `BUSDATE` left alone, a memo only          verifier test 1
+#   every `{{ ds }}` in the file shifted       verifier tests 2 and 3 — the run
+#                                              calendar gates the day the box
+#                                              STARTS, and the ticket says both
+#                                              of those steps stay
+#   the shift written by string arithmetic     verifier test 1: 2026-03-01 and
+#     (`ds[:8] + str(int(ds[8:]) - 1)`)        2026-01-01
+#   the day subtracted inside `run_step`       do_not_modify covers
+#                                              `include/lib/**`
+#   the calendar reader repaired instead       verifier test 1 still fails, and
+#                                              test 4 keeps both names
+#   the trigger rewritten and `check=False`    verifier test 5
+#     dropped, so a quiet night goes red
+#   a task deleted so the wrong line stops     dag_structure keeps all four
+#     appearing in the log
+#   the JIL header "corrected" to say `ds`     do_not_modify covers `legacy/**`
+#   the wave 2 note taken at face value —      5: it is 23 Fridays covered, not
+#     "Fridays are still the gap"              missing, since January
+#   the whole 161 nights called tie-out        3: only 112 of them started a
+#     nights                                   calendared box
+#   the export's 251 days used as the window   3
+#   the count taken off the broken reader      3: that reader answers no to
+#     (`calendar_days()` returns 50 entries,   every date there is, so it gives
+#     none of them ISO)                        no count at all
+#   the post-cutover rows counted instead of   1: the rule holds on every row
+#     the whole table (1,955 not 15,577)       the table has, which is what
+#                                              makes it a rule and not a habit
+#   the April control break blamed             1, 2 and 6 all still fail: the
+#     (`load_status` goes `failed` from        break is a real fault in the same
+#     2026-04-07) or the wave 1 cliff          table with its own ticket, and it
+#     (22 job names a night, then 13)          moves none of these figures
+#
+# What is NOT convicted, on purpose:
+#
+#   - The write-up may reach the 112 by parsing `retail_2026.cal` or by reading
+#     `raw.market_calendar`. The two agree exactly for 2026 and the ticket
+#     points at the warehouse without forbidding the file.
+#   - A reply that also fixes `check_jobs_wrote` fails verifier test 3, and
+#     that is deliberate rather than an accident of wording: the ticket names
+#     that step, says what moving it would change, and asks for it in the
+#     write-up instead. A reply that argues in `RESPONSE.md` that it ought to
+#     move, and leaves it, passes everything.
+#   - Any spelling of the day before — `macros.ds_add`, a `pendulum` shift, a
+#     `datetime` in the callable. The verifier renders the task's own arguments
+#     and calls the step, so it takes no view on which one the writer chose.
+#   - `20 Sundays` and `3 Mondays` are asked for as a split but graded only
+#     through the 23 and the two day names. A reply that lists the 23 dates and
+#     names the weekdays without adding them up passes 4, which is right: the
+#     dates are the answer and the split is arithmetic on it.
+#
+# Patterns are matched case-insensitively with re.search and are written loose
+# on purpose: a number may carry a comma or not, and a label may be bold,
+# bracketed or punctuated any way the writer likes. Each pins a figure or a
+# named thing, never a phrasing.
+replay: []
+
+checks:
+
+# The fix imports and the bridge is still in the bag.
+- kind: dag_parses
+  dag_id: sc_autosys_bridge
+
+# Four tasks: what the calendar says, what the JIL still defines, the trigger,
+# and what the control table shows for the night. An agent that makes a wrong
+# log line go away by deleting the task that writes it has not moved the
+# variable, and no other check here would notice.
+- kind: dag_structure
+  dag_id: sc_autosys_bridge
+  task_ids:
+  - report_calendar_day
+  - report_boxes
+  - trigger_nightly
+  - check_jobs_wrote
+  operators:
+    report_calendar_day: PythonOperator
+    report_boxes: PythonOperator
+    trigger_nightly: PythonOperator
+    check_jobs_wrote: PythonOperator
+
+# The substance of the code half. See verifier/test_busdate.py — five tests over
+# the patch, no authored dates, the runner stubbed because it shells `ssh`. Its
+# sixth test grades the world instead: it recomputes the six figures below from
+# the warehouse and the export, so a timeline change fails there rather than
+# leaving these patterns looking for a number the world no longer gives.
+- kind: pytest_verifier
+  file: test_busdate.py
+
+# 1. The rule, settled from the estate's own record. The ticket asks for both
+# counts because one of them is the whole point: a rule with no exceptions in
+# 15,577 rows is a rule, and a header comment cut in December is not evidence.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b15[,\s]?577\b'
+  - '(\bnone\b|\bno rows?\b|\bzero\b|\b0\b|every row|all of them|all 15|without exception|no exception|not one)'
+
+# 2. How long it has been going on. 161 is the distinct business dates the
+# control table holds from the cutover to its last row, and it is also the
+# calendar days from 2026-01-05 to 2026-06-14 — the two routes agree, which is
+# why the ticket says where to stop counting.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((\b161\b)[^\n]{0,70}(night|run|date|day)|(night|run|date|day)[^\n]{0,70}(\b161\b))'
+
+# 3. How many of those nights reached finance. The tie-outs and the packs carry
+# `run_calendar: retail_2026`, so they start on 112 of the 161. The bridge's own
+# calendar reader cannot produce this number — it answers no to every date —
+# so the figure has to come from the export read properly or from
+# `raw.market_calendar`.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((\b112\b)[^\n]{0,80}(night|run|day|calendar|trading|recon|tie|pack|dist)|(night|run|day|calendar|trading|recon|tie|pack|dist)[^\n]{0,80}(\b112\b))'
+
+# 4. The nights that went missing. Sunday is the bulk of it and the three
+# Mondays are the half that needs the calendar rather than a weekday rule: a
+# Monday the calendar leaves out used to be carried by the Tuesday after it.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The last two alternatives cross a newline on purpose: a reply that puts
+  # "**23**" on its own markdown line and itemizes "20 Sundays" below it has
+  # answered, and the same-line window missed it. They are held to the two
+  # day-names alone — the looser words next to a 23 also sit in the Friday
+  # half that check 5 grades, and crossing lines with those would grant it.
+  # The cross-newline bridges are tempered with (?!friday): the 23 Fridays the
+  # trap invites sit one list item above the Sundays in any normal layout, so
+  # an untempered bridge grants this check off the Friday sentence — "23
+  # Fridays. / Never covered: the Sundays" matched it.
+  - '((\b23\b|twenty[- ]?three)[^\n]{0,60}(sunday|missing|never|no tie|lost|gap|uncovered)|(sunday|missing|never|lost|gap|uncovered)[^\n]{0,60}(\b23\b|twenty[- ]?three)|(\b23\b|twenty[- ]?three)(?:(?!friday)[\s\S]){0,60}(sunday|monday)|(sunday|monday)(?:(?!friday)[\s\S]){0,60}(\b23\b|twenty[- ]?three))'
+  - '(sunday)'
+  - '(monday)'
+  - '(holiday|2026-01-19|2026-02-16|2026-05-25|leaves? (each )?(of those |them )?out|not a calendar day|off the calendar)'
+
+# 5. The nights that appeared. This is the half finance recognised and it is
+# the one that overturns the wave 2 note: a Friday tie-out never existed under
+# the old profile, and there has been one every week since January. A reply
+# that repeats the note — "Fridays are the gap" — fails here.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((\b23\b|twenty[- ]?three)[^\n]{0,40}friday|friday[^\n]{0,40}(\b23\b|twenty[- ]?three))'
+
+# 6. Why it survived six months. The ticket asks for the step by name: the
+# trigger and the control-table read have been out by the same day, so the
+# morning log has always agreed with itself.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'check_jobs_wrote'
+  - '(same[^\n]{0,25}(day|date|ds)|agree|matche?s?[^\n]{0,25}(the )?(wrong|same)|both[^\n]{0,40}(wrong|out|shifted)|out by the same|cancel|consistent)'

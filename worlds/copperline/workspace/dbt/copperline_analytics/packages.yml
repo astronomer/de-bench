@@ -1,0 +1,15 @@
+# dbt-utils is held at 0.8.6 because dbt-core is held at 1.6. Two things in
+# this project depend on the old version and break on the new one:
+#
+#   * surrogate_key. 0.8.6 ships surrogate_key and treats NULL as the empty
+#     string. 1.x renames it generate_surrogate_key and hashes NULL as the
+#     literal 'NULL'. Every key in models/shared/ changes value on that move,
+#     which reshuffles every incremental table that keys on one.
+#   * deduplicate. The 0.8.6 signature is (relation, partition_by, order_by).
+#     1.x takes a relation alias as well.
+#
+# The order the pins move in is docs/runbooks/upgrade.md. Do not bump this file
+# on its own.
+packages:
+  - package: dbt-labs/dbt_utils
+    version: 0.8.6

@@ -1,0 +1,56 @@
+orders_extract:
+  default_args:
+    start_date: 2025-01-01
+    retry_delay:
+      __type__: datetime.timedelta
+      seconds: 60
+  schedule: '@daily'
+  dagrun_timeout:
+    __type__: datetime.timedelta
+    seconds: 1800
+  catchup: false
+  tasks:
+    pull_orders:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo pull
+      execution_timeout:
+        __type__: datetime.timedelta
+        seconds: 300
+    write_orders:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo write
+      dependencies: [pull_orders]
+
+orders_transform:
+  default_args:
+    start_date: 2025-01-01
+  schedule: '@daily'
+  catchup: false
+  tasks:
+    transform:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo transform
+
+orders_load:
+  default_args:
+    start_date: 2025-01-01
+  schedule: '@hourly'
+  dagrun_timeout:
+    __type__: datetime.timedelta
+    seconds: 600
+  catchup: false
+  tasks:
+    load:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo load
+
+inventory_sync:
+  default_args:
+    start_date: 2025-01-01
+  schedule: '@hourly'
+  catchup: false
+  tasks:
+    sync:
+      operator: airflow.providers.http.operators.http.HttpOperator
+      endpoint: /api/sync
+      http_conn_id: warehouse

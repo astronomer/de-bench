@@ -1,0 +1,163 @@
+# The ticket has a code half and a reading half, and they are graded apart.
+#
+# THE CODE HALF. `sc_autosys_bridge.calendar_days()` reads the AutoSys run
+# calendar and it is wrong three ways at once:
+#
+#   legacy/autosys/calendars/retail_2026.cal   an `autocal_asc` export. Comments
+#                          are `/* ... */`, and the header block lists the
+#                          eleven holidays that were left out, written exactly
+#                          the way the calendar days are. A date line carries
+#                          six dates. Every date is `MM/DD/YYYY`.
+#   the shipped reader     skips a line only when it starts with `*`, so `/*`
+#                          and `calendar:` both land in the answer; takes
+#                          `line.split()[0]`, so five dates in six are dropped;
+#                          and never turns the date round, so nothing it holds
+#                          can ever equal a `ds`. Fifty entries, none of which
+#                          is an ISO date: `is_due` has answered no to every
+#                          date in the world since the January cutover.
+#
+# Nothing here runs the DAG. `trigger_nightly` shells `ssh` to a box that is not
+# in the container, so a `dag_runs` check would be red whatever the calendar
+# says and would grade the network. There is no `unchanged` check either: the
+# bridge writes no relation, so a differential over it could not fail, and a
+# check that cannot fail is worse than no check.
+#
+# THE READING HALF. Four records, and the ticket says which of them win. The
+# `legacy/tidal/inventory_jobs.csv` planning sheet is wrong in two separate
+# ways, and both are only visible against the other three:
+#
+#   nightly_stock_ledger, nightly_customer_master   the sheet marks both wave 1,
+#                          against `sc_stock_ledger_daily` and
+#                          `cus_customer_master_daily`. Neither string appears
+#                          anywhere else in the tree, both boxes are still
+#                          `insert_job` lines in `copperline.jil`, and both
+#                          still write `ops.load_control` rows after
+#                          2026-01-05, which the nine that moved stop doing.
+#   nightly_edi_852, cpl.stage.erp.costing, nwv_planogram_feed   named on the
+#                          sheet and in no other file in the world.
+#   cpl.util.archive.logs  `run_calendar: retail_2025`, a calendar the estate
+#                          does not hold, on a job carrying `status: OI`.
+#
+# What the battery convicts, by wrong answer:
+#
+#   the comment skip fixed and nothing else    verifier: the count is still
+#                                              short of the export's
+#   the date format fixed and nothing else     verifier: same
+#   a weekday-and-holiday rule written out     verifier: the export's year is
+#     instead of the file being read           the only year it answers for
+#   `calendar_days`/`is_due` renamed or moved  verifier's fixture; the ticket
+#     into the house library                   pins both names, and
+#                                              `include/lib/**` is protected
+#   the .cal rewritten into ISO dates          do_not_modify covers `legacy/**`
+#   the calendar task deleted so the log       dag_structure keeps all four
+#     stops saying it                          tasks
+#   the planning sheet taken at face value     3 and 4
+#   "the sheet is wrong, so it is fifteen"     5 — both jobs were inside the
+#                                              thirteen already
+#   251 counted, the one-year limit missed     1
+#   `run_calendar` grepped, retail_2025 missed 2
+#   the warehouse never opened                 6
+#
+# What is NOT convicted, on purpose. `calendar_days()` may hand back `date`
+# objects rather than ISO strings — the ticket pins the name and the answer, not
+# the type, and the count test compares lengths. It may cache the file. And a
+# memo that calls `cpl.stage.erp.costing` "the ERP costing extract" passes: the
+# pattern takes the prose spelling as well as the job name.
+#
+# The six memo checks are patterned loose on purpose, the way `be94e2`'s are:
+# each pins a name, a figure or a record, never a phrasing.
+replay: []
+
+checks:
+
+# The fix imports and the bridge is still in the bag.
+- kind: dag_parses
+  dag_id: sc_autosys_bridge
+
+# Four tasks: what the calendar says, what the JIL still defines, the trigger,
+# and what the control table shows for the night. An agent that makes the wrong
+# log line go away by deleting the task that writes it has not read the
+# calendar, and no other check here would notice.
+- kind: dag_structure
+  dag_id: sc_autosys_bridge
+  task_ids:
+  - report_calendar_day
+  - report_boxes
+  - trigger_nightly
+  - check_jobs_wrote
+  operators:
+    report_calendar_day: PythonOperator
+    report_boxes: PythonOperator
+    trigger_nightly: PythonOperator
+    check_jobs_wrote: PythonOperator
+
+# The substance of the code half. See verifier/test_calendar.py — four tests,
+# every expected day parsed out of the read-only export in the same session.
+- kind: pytest_verifier
+  file: test_calendar.py
+
+# 1. How big the calendar is and how far it reaches. 251 is the count of the
+# dates in the export, and the export's own closing comment says the same
+# number. The second pattern is the half that costs something: the file covers
+# 2026 and the estate has run since 2024-02-04, so a calendar built on it alone
+# cannot answer for two of the years it has already run.
+- kind: file_contains
+  path: docs/memos/wave-2-scope.md
+  matches:
+  - '\b251\b'
+  - '(2026-01-02|2026-12-31|(only|nothing|no|does not|cannot)[^\n]{0,60}\b2026\b|\b2026\b[^\n]{0,30}(only|and nothing else)|calendar year 2026|the 2026 calendar|one (calendar )?year)'
+
+# 2. The job that names a calendar the estate does not hold. `retail_2026` is
+# on eight boxes and is easy; `retail_2025` is on one line of 726 and the job
+# carrying it is on ice, which is the other half of the answer.
+- kind: file_contains
+  path: docs/memos/wave-2-scope.md
+  matches:
+  - 'cpl\.util\.archive\.logs'
+  - 'retail_2025'
+  - '(on ice|\bOI\b|inactive|disabled|switched off|turned off|not running|never runs|\boff\b|held)'
+
+# 3. The two jobs the sheet says moved and which did not. Naming them is not
+# enough: the third pattern is what the sheet claims they became — two DAG ids
+# that exist nowhere — and the fourth is the record that settles it. An agent
+# that trusts the planning sheet cannot write any of the four.
+- kind: file_contains
+  path: docs/memos/wave-2-scope.md
+  matches:
+  - 'nightly_stock_ledger'
+  - 'nightly_customer_master'
+  - '(sc_stock_ledger_daily|cus_customer_master_daily)'
+  - '(load_control|copperline\.jil|\.jil\b|delete_job)'
+
+# 4. The rows on the sheet that name nothing. Each of the three appears in
+# exactly one file in the world, which is the point: the sheet is the only
+# witness to them and it is not a witness worth having.
+- kind: file_contains
+  path: docs/memos/wave-2-scope.md
+  matches:
+  - 'nightly_edi_852'
+  - '(cpl\.stage\.erp\.costing|erp\.costing|erp costing)'
+  - '(nwv_planogram_feed|planogram)'
+
+# 5. The number the funding paper needs. Thirteen, three ways: the runbook says
+# it, the JIL still defines thirteen `nightly_*` boxes, and the control table
+# carries twenty-two job names a night to 2026-01-04 and thirteen from
+# 2026-01-05. The trap is check 3 — an agent that finds the two jobs the sheet
+# wrongly moved and adds them to the thirteen has counted them twice.
+- kind: file_contains
+  path: docs/memos/wave-2-scope.md
+  matches:
+  - '((\b13\b|thirteen)[^\n]{0,60}(jobs?|boxes|remain|left|still|run)|(jobs?|boxes|remain|left|still|run)[^\n]{0,60}(\b13\b|thirteen))'
+
+# 6. Where the same fact lives once the export runs out. `raw.market_calendar`
+# at `market_code = 'US'` gives the same 251 trading days for 2026 and covers
+# the years the export does not, so the answer to "what do we do about 2025 and
+# 2027" is already in the warehouse. A memo that never opens it has answered the
+# first five questions off four files and never checked what this deployment
+# already knows.
+- kind: file_contains
+  path: docs/memos/wave-2-scope.md
+  matches:
+  - 'market_calendar'
+  - '(is_trading_day|trading day)'
+  - '(agree|match|identical|the same|no difference|line up|tally|same 251)'

@@ -1,0 +1,5 @@
+{
+  "removed_kwargs": {
+    "KubernetesPodOperator": ["is_delete_operator_pod"]
+  }
+}

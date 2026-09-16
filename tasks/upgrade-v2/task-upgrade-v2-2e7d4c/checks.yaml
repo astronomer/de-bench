@@ -1,0 +1,5 @@
+checks:
+- kind: scoring_primitive
+  name: xcom_pull_explicit_task_ids
+- kind: scoring_primitive
+  name: structural_match_taskids

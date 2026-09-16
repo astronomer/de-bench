@@ -1,0 +1,4 @@
+{
+  "path": ["2.8.x", "2.11.x"],
+  "notes": "Both endpoints are inside the 2.x major and Airflow doesn't require an LTS bridge for in-major upgrades. A single hop is fine."
+}

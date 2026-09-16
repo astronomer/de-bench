@@ -1,0 +1,4 @@
+{
+  "path": ["2.5.3", "2.10.x", "3.x"],
+  "rationale": "Source pin is 2.5.3. Airflow 3 ships only the migrations from the 2.6.2 baseline forward; running airflow db migrate from a 3.x binary against a 2.5.x database has no migration chain. The supported route is a two-stage upgrade: first apply the 2.5 -> 2.10 LTS migrations using a 2.10 binary, then move to any 3.x release using the 3.x binary. Target endpoint is `3.x` because the prompt only says 'land on Airflow 3'; agents that target a more current 3.minor than the gold was authored against (e.g. 3.2 vs 3.0) are not penalised."
+}

@@ -1,0 +1,61 @@
+# SLA attainment by queue: how many tickets were answered and resolved inside
+# the target, for the previous day.
+#
+# Support has no shared logic and no grain to collapse, so it goes from
+# staging straight to the mart with no intermediate model. That thin case is
+# deliberate — the middle layer is earned, not mandatory.
+#
+# Tickets land hourly, so the previous day is complete by the time this runs
+# at 07:00. The day being reported is `{{ macros.ds_add(ds, -1) }}`.
+dag_id: cus_support_sla_daily
+schedule: "0 7 * * *"
+description: support SLA attainment by queue for the previous day
+start_date: 2026-01-05
+tags: [customer, support, mart, blueprint]
+default_args:
+  owner: customer
+  retries: 2
+
+steps:
+  wait_for_tickets:
+    blueprint: sensor_wait
+    asset: raw.support_tickets
+    partition_col: "opened_at::DATE"
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    poke_interval: 300
+    timeout: 7200
+    mode: reschedule
+
+  stage_tickets:
+    blueprint: dbt_select
+    depends_on: [wait_for_tickets]
+    select: stg_support__tickets
+
+  build_sla:
+    blueprint: dbt_select
+    depends_on: [stage_tickets]
+    select: support_sla_daily
+    vars:
+      run_date: "{{ macros.ds_add(ds, -1) }}"
+
+  queue_volume:
+    blueprint: rollup
+    depends_on: [stage_tickets]
+    source: raw.support_tickets
+    group_by: [channel]
+    agg: count
+    column: ticket_id
+    as: tickets
+    target: ops.support_volume_daily
+    # The source has no partition column of its own, so the day is a filter
+    # rather than a scope, and the target's own `ds` carries it.
+    where: "opened_at::DATE = '{{ macros.ds_add(ds, -1) }}'"
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+
+  publish_sla:
+    blueprint: partition_export
+    depends_on: [build_sla, queue_volume]
+    source: marts.support_sla_daily
+    name: support_sla
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [queue]

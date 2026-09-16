@@ -1,0 +1,34 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/alerting.md
+# Not a mart schema: this consumer's subject is a list of watched tables, so the
+# schema enumerates the list and enforcement checks that config/alerts.yml holds
+# nothing this file does not name, and that every entry carries an owner.
+#
+# PLAT-455, 2026-06-15. The list below was a copy of the January config and the
+# config has moved under it since. `source_of_truth` is the config and AL-3 says
+# the same thing in prose, so the config defines the membership, the owner and
+# the check, and this list follows it. Reconciled table by table against
+# config/alerts.yml; see RESPONSE.md for the five tables that came off the list.
+#
+# Nothing runs the first half of the sentence above. plat_contracts_enforce
+# skips a contract that names no model, and gro_alerting_daily only reports the
+# subjects nobody owns. PLAT-456 is the list check.
+consumer: C-10
+owner: growth
+source_of_truth: config/alerts.yml
+subjects:
+  - {table: raw.web_events, owner: growth, kind: volume}
+  - {table: ops.session_daily, owner: growth, kind: volume}
+  - {table: raw.ads_spend_daily, owner: growth, kind: freshness}
+  - {table: raw.comp_prices, owner: growth, kind: volume}
+  - {table: marts.gmv_daily, owner: commerce, kind: volume}
+  - {table: marts.comp_sales_daily, owner: finance, kind: volume}
+  - {table: raw.pos_sales_header, owner: commerce, kind: freshness}
+  - {table: raw.carrier_scans, owner: supply, kind: null_rate}
+  - {table: marts.inventory_position, owner: supply, kind: volume}
+  - {table: marts.customer_360, owner: customer, kind: null_rate}
+  - {table: raw.email_events, owner: growth, kind: freshness}
+  - {table: marts.audience_segments, owner: growth, kind: volume}
+  - {table: raw.seo_rankings, owner: growth, kind: volume}
+tests:
+  - every_subject_has_owner: true
+  - quiet_days_source: ops/calendar/quiet-days.yml

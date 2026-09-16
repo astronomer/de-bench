@@ -1,0 +1,29 @@
+# The replenishment feed's own config. `sc_replenishment_daily` reads it when a
+# task runs and assembles the mart's name from the three keys below, so dbt
+# cannot see the read and a grep for the mart's name does not find this
+# consumer. `docs/lineage.md` lists it.
+#
+# Agreed with Ironwood 2023-02-27, last amended 2025-07-15.
+# contracts/replenishment.md is the agreement.
+
+schema: marts
+subject: inventory
+grain: position
+
+# The distribution centres the feed covers. Closed and seasonal locations drop
+# out of the map by leaving this list; a location that reopens has to be added
+# back here, because nothing infers it.
+locations:
+  - DC-POR
+  - DC-SAC
+  - DC-DAL
+  - DC-ATL
+  - DC-CHI
+  - DC-LEE
+  - HUB-DEN
+  - HUB-SEA
+  - HUB-DUB
+
+# Ironwood's planning run starts at 06:15 and takes what is there.
+cutoff: "06:00"
+conn_id: ironwood_sftp

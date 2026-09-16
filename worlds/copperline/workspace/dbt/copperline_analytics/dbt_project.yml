@@ -1,0 +1,114 @@
+name: copperline_analytics
+version: 1.4.0
+config-version: 2
+
+profile: copperline_analytics
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+require-dbt-version: [">=1.6.0", "<1.7.0"]
+
+# The warehouse clock is pinned. Every model that needs "today" reads var('ds').
+# Nothing in this project calls current_date, now() or a Python clock: a model
+# that reads the wall clock gives a different answer on a replay than it gave on
+# the night it ran, and every backfill this team has done has been a replay.
+vars:
+  ds: "{{ env_var('WORLD_TODAY', '2026-06-15') }}"
+  # dbt-utils 0.8.6 hashes NULL as the empty string unless this is on. Leave it
+  # on: turning it off silently changes every surrogate key in the warehouse.
+  surrogate_key_treat_nulls_as_empty_strings: true
+  # Windows the aggregates use, in days. Named here so a change lands once.
+  rfm_window_days: 365
+  cohort_window_days: 730
+
+on-run-start:
+  - "{{ copperline_audit_open() }}"
+
+on-run-end:
+  - "{{ copperline_audit_close(results) }}"
+
+models:
+  copperline_analytics:
+    # persist_docs is off. The DuckDB adapter at this pin implements neither
+    # alter_relation_comment nor alter_column_comment, so turning it on fails
+    # every model that carries a description. The descriptions still ship in the
+    # manifest and in `dbt docs`; they just do not reach the warehouse.
+    +persist_docs:
+      relation: false
+      columns: false
+
+    shared:
+      staging:
+        +schema: stg
+        +materialized: view
+        +tags: ["stg", "platform"]
+      intermediate:
+        +schema: int
+        +materialized: view
+        +tags: ["int", "platform"]
+      dims:
+        +schema: marts
+        +materialized: table
+        +tags: ["dim", "platform", "conformed"]
+      ops:
+        +schema: ops_analytics
+        +materialized: table
+        +tags: ["ops", "platform"]
+
+    commerce:
+      +schema: marts
+      +materialized: table
+      +tags: ["commerce"]
+      intermediate:
+        +schema: int
+        +materialized: view
+        +tags: ["int", "commerce"]
+
+    growth:
+      +schema: marts
+      +materialized: table
+      +tags: ["growth"]
+      intermediate:
+        +schema: int
+        +materialized: view
+        +tags: ["int", "growth"]
+
+    supply:
+      +schema: marts
+      +materialized: table
+      +tags: ["supply"]
+      intermediate:
+        +schema: int
+        +materialized: view
+        +tags: ["int", "supply"]
+
+    finance:
+      +schema: marts
+      +materialized: table
+      +tags: ["finance"]
+      intermediate:
+        +schema: int
+        +materialized: view
+        +tags: ["int", "finance"]
+
+    customer:
+      +schema: marts
+      +materialized: table
+      +tags: ["customer"]
+      intermediate:
+        +schema: int
+        +materialized: view
+        +tags: ["int", "customer"]
+
+snapshots:
+  copperline_analytics:
+    +target_schema: snapshots
+
+tests:
+  +store_failures: false
+  +severity: error

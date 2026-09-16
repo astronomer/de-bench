@@ -1,0 +1,7 @@
+checks:
+- kind: scoring_primitive
+  name: airflow_pin_target_aligned
+- kind: scoring_primitive
+  name: uses_sql_execute_query_operator
+- kind: scoring_primitive
+  name: structural_match_taskids

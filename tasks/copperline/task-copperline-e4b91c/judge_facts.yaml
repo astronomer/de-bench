@@ -1,0 +1,163 @@
+# The judge's answer key for this task's RESPONSE.md prose checks — what each
+# check requires, as plain facts. Generated from the regex patterns and rubric
+# comments in checks.yaml, calibrated against the solution, and reviewed; the
+# patterns in checks.yaml remain as provenance. Grading semantics: a check
+# passes only if the answer states at least one fact from EVERY group; stating
+# anything in `convicts` fails the check outright. `seq` is the check's
+# ordinal among this task's file_contains checks on RESPONSE.md, in file
+# order — the same order score.json labels them.
+checks:
+- seq: 0
+  background: 'The working paper''s claims. Patterns are matched case-insensitively with
+
+    re.search and are written loose on purpose: each pins a rate, a column name, a
+
+    fact or a direction, never a phrasing, and a table row satisfies them as
+
+    readily as a sentence.
+
+    What the header number is. The rate has to be on the page, and it has to be
+
+    stated as the rule for the book rather than as an observation about one
+
+    invoice. A reply that says "the header tax looks wrong" has not said what it
+
+    is.'
+  groups:
+  - any_of:
+    - The answer states that the header tax field (raw.invoices.tax_cents) is a single fixed
+      rate of 8.33 per cent (equivalently 0.0833, 1/12, or one-twelfth, or 833 basis points)
+      of the invoice amount.
+    - The answer gives 8.33 per cent (or 0.0833 / 1/12 / one-twelfth / 833 bps) as the rate
+      the header tax column applies, e.g. 8.33 per cent of total_cents on goods invoices and
+      of net_cents on plan invoices.
+    - A table, formula or line in the answer shows the header tax equal to 8.33 per cent (0.0833,
+      1/12, one-twelfth) of the invoice base.
+  - any_of:
+    - The answer says the 8.33 per cent (0.0833 / 1/12 / one-twelfth / 833 bps) figure is
+      flat, constant, fixed, uniform, hard-coded or a plug — i.e. it does not vary by market,
+      entity, currency or year.
+    - The answer says the 8.33 per cent rate holds for every invoice / all 196,754 rows /
+      every market, or that it is not a real tax rate or calculation.
+    - The answer contrasts the same 8.33 per cent rate appearing in unrelated jurisdictions
+      to show the rate never varies.
+  convicts:
+  - The answer only observes that the header tax looks wrong or is inconsistent without ever
+    stating the rate it embodies.
+  - The answer treats the header tax as a legitimate jurisdiction-specific tax calculation.
+  - The answer concludes that the line-level tax is the erroneous figure and the header tax
+    is the amount to file.
+- seq: 1
+  background: 'Which number is the tax we charged, and the evidence from outside the AR
+
+    export. The ticket asks for corroboration in as many words, and the order feed
+
+    is where it is: the line tax sums to `raw.orders.tax_cents` on every goods
+
+    invoice. A reply that prefers the lines because they look more detailed has
+
+    asserted rather than shown.'
+  groups:
+  - any_of:
+    - Cites the order feed (raw.orders / orders.tax_cents / order header / order spine / the
+      orders table) as the corroborating source outside the AR export
+    - Names raw.orders.tax_cents as the independent evidence for the tax we charged
+    - Points to the order spine/order feed rather than only the AR export
+  - any_of:
+    - States that the summed line tax_cents ties/matches/agrees with raw.orders.tax_cents
+      on every goods invoice
+    - Shows the invoice lines reconcile to the order header tax to the cent
+    - Says line tax equals the order feed tax exactly (identical / to the cent) across goods
+      invoices
+  convicts:
+  - Prefers the line-level tax merely because it is more detailed or granular, without showing
+    agreement with an outside source
+  - Asserts the line tax is correct without citing corroboration from the order feed
+  - Treats the AR export alone as sufficient evidence for the tax charged
+  - Claims the line tax and raw.orders.tax_cents disagree or cannot be reconciled
+- seq: 2
+  background: 'The direction, market by market. One flat rate standing in for nine overstates
+
+    the US book and understates every market that charges VAT, and the group figure
+
+    is what is left after they cancel. A reply that reports the group difference as
+
+    the size of the error fails here.'
+  groups:
+  - any_of:
+    - The answer states that applying the single blended rate overstates the tax/liability
+      in the US market (US amounts are reported too high, inflated, over-declared or over-charged).
+    - The answer identifies at least one market where the flat rate produces an overstatement
+      of tax, rather than reporting only a net group figure.
+  - any_of:
+    - The answer states that the VAT-charging markets are understated by the single blended
+      rate (their tax is too low, under-declared, under-charged or short).
+    - The answer notes the error runs the other way / in the opposite direction for the non-US
+      (VAT) markets.
+  - any_of:
+    - The answer names specific affected markets by name or code, e.g. GB / United Kingdom
+      / Britain, IE / Ireland, DE / Germany, or CA / Canada.
+    - The answer breaks the error down market by market, citing individual jurisdictions such
+      as the UK, Ireland, Germany or Canada.
+  convicts:
+  - The answer reports the net group-level difference as the size of the error, treating the
+    offsetting overstatement and understatement as the magnitude of the problem.
+  - The answer concludes the error is immaterial or negligible because the per-market differences
+    largely cancel out at group level.
+  - The answer treats the single blended rate as acceptable across all nine markets and identifies
+    no directional misstatement.
+- seq: 3
+  background: 'The plan invoices, and what their tie is worth. It is the flat rate on the
+
+    header agreeing with the flat rate on the line, so it is no assurance at all.
+
+    The reply this is aimed at is the one that offers the plan book as proof the
+
+    header is sound; the second pattern is what convicts it.'
+  groups:
+  - any_of:
+    - The answer refers to the plan invoice (the plan book, plan line, or plan-only record)
+      as the item being examined.
+    - The answer discusses the invoices generated from the plan and their evidentiary role.
+  - any_of:
+    - The answer states that the header flat rate and the line flat rate are the same figure,
+      so agreeing with each other proves nothing.
+    - The answer says the tie between header and line is circular — the same flat rate plugged
+      on both sides — and therefore gives no assurance or comfort.
+    - The answer says matching the plan header to the plan line is meaningless/vacuous and
+      tells us nothing about whether the header rate is correct.
+    - The answer says the plan-to-plan agreement is not evidence that the header rate is sound.
+  convicts:
+  - The answer treats the plan book (plan invoice/plan line) as adequate proof or corroboration
+    that the header flat rate is sound.
+  - The answer claims the header-to-line agreement provides real assurance, comfort, or independent
+    verification of the flat rate.
+  - The answer recommends relying on the plan invoices alone to validate the header rate,
+    without noting the circularity.
+- seq: 4
+  background: 'What is left over. The order-level discount sits on the invoice header,
+
+    because the header total is the order''s grand total, and it reaches no invoice
+
+    line. Naming the column is the last step of the reconciliation and the ticket
+
+    asks for it.'
+  groups:
+  - any_of:
+    - The leftover amount is the order-level discount, stored in the invoice header column
+      order_discount_cents.
+    - The remainder corresponds to the order discount held on the invoice header (order_discount_cents).
+    - It is the header-level order discount field, named order_discount_cents.
+    - The gap is explained by the order-level (header) discount column.
+  - any_of:
+    - This discount reaches no invoice line — it lives only on the header.
+    - It is never pushed down to the invoice lines, so no line carries any part of it.
+    - The order-level discount is never allocated or spread across the invoice lines.
+    - It is absent from the lines; the amount appears on the header only.
+    - No invoice line holds this discount — it is not on any line.
+  convicts:
+  - The order discount is allocated proportionally across the invoice lines.
+  - Each invoice line carries a share of the order-level discount.
+  - The leftover comes from line-level discounts rather than a header discount.
+  - The discount is pushed down to the lines during invoicing.
+  - The header total excludes the order-level discount.

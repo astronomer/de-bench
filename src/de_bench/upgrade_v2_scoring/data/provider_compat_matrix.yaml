@@ -1,0 +1,103 @@
+# Provider × Airflow compatibility matrix for the diagnosis primitive
+# `provider_compatibility_check`.
+#
+# Each provider major version declares:
+#   - `min_airflow`: the lowest apache-airflow version the provider's
+#     `__init__.py::airflow-version` constraint admits. Below this
+#     line the provider's release simply will not install — pip
+#     resolves the conflict by refusing the combination.
+#   - `max_airflow_major_minor` (optional): the last AF major.minor
+#     for which the provider major still releases compatible patches.
+#     Absent ⇒ no known upper bound. AF3 introduced the task SDK
+#     migration; many AF2-era provider majors (snowflake 4.x/5.x,
+#     google 8.x/10.x/11.x, cncf-kubernetes 9.x) cap out before AF3
+#     because their operator inheritance hierarchy never picked up
+#     the SDK-side BaseOperator move.
+#   - `max_known_release`: the last patch shipped under that major.
+#     Informational; the primitive does not gate on it.
+#
+# Sources: each provider's PyPI metadata (`requires_dist`) for
+# `min_airflow`; PyPI release index for `max_known_release`. The
+# matrix is the bench's source-of-truth for the diagnosis fixtures —
+# adding a provider is a YAML edit; adding a new diagnosis shape
+# (e.g. extras incompat) needs a Python primitive.
+#
+# Why a snapshot date matters: an Otto answering with current-PyPI
+# knowledge will look wrong against a stale matrix and a stale-Claude
+# answering with cached knowledge will look right. Refresh on a known
+# cadence (target: monthly during pre-publish) so the bench measures
+# capability, not staleness.
+
+snapshot_date: "2026-06-22"
+
+providers:
+  snowflake:
+    "4":
+      min_airflow: "2.4.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "4.4.2"
+    "5":
+      min_airflow: "2.8.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "5.8.1"
+    "6":
+      min_airflow: "2.11.0"
+      max_known_release: "6.12.2"
+  google:
+    "8":
+      min_airflow: "2.3.0"
+      max_airflow_major_minor: "2.9"
+      max_known_release: "8.12.0"
+    "10":
+      min_airflow: "2.8.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "10.26.0"
+    "11":
+      min_airflow: "2.8.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "11.0.0"
+    "12":
+      min_airflow: "2.9.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "12.0.0"
+    "14":
+      min_airflow: "2.9.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "14.1.0"
+    "15":
+      min_airflow: "2.9.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "15.1.0"
+    "16":
+      min_airflow: "2.10.0"
+      max_known_release: "16.1.0"
+    "17":
+      min_airflow: "2.10.0"
+      max_known_release: "17.2.0"
+    "18":
+      min_airflow: "2.10.0"
+      max_known_release: "18.1.0"
+    "19":
+      min_airflow: "2.11.0"
+      max_known_release: "19.5.0"
+    "20":
+      min_airflow: "2.11.0"
+      max_known_release: "20.0.0"
+    "21":
+      min_airflow: "2.11.0"
+      max_known_release: "21.2.0"
+    "22":
+      min_airflow: "2.11.0"
+      max_known_release: "22.2.0"
+  cncf-kubernetes:
+    "8":
+      min_airflow: "2.8.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "8.4.2"
+    "9":
+      min_airflow: "2.8.0"
+      max_airflow_major_minor: "2.10"
+      max_known_release: "9.0.1"
+    "10":
+      min_airflow: "2.11.0"
+      max_known_release: "10.16.1"

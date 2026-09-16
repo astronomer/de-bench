@@ -1,0 +1,182 @@
+version: 2
+
+models:
+
+  - name: fct_gl_postings
+    description: Journal-line grain. Debits positive, credits negative.
+    columns:
+      - name: posting_key
+        tests: [unique, not_null]
+      - name: account_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_account')
+              field: account_key
+      - name: date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: signed_amount_base_cents
+        tests: [not_null]
+      - name: fx_rate_ppm
+        tests: [not_null]
+      - name: fx_rate_date
+        tests: [not_null]
+
+  - name: fct_invoice_line
+    columns:
+      - name: invoice_line_key
+        tests: [unique, not_null]
+      - name: invoice_id
+        tests: [not_null]
+      - name: line_total_cents
+        tests: [not_null]
+      - name: currency_key
+        tests:
+          - relationships:
+              to: ref('dim_currency')
+              field: currency_key
+      - name: account_key
+        tests:
+          - relationships:
+              to: ref('dim_account')
+              field: account_key
+
+  - name: fct_ar_invoices
+    columns:
+      - name: invoice_key
+        tests: [unique, not_null]
+      - name: header_total_cents
+        tests: [not_null]
+      - name: header_line_variance_cents
+        description: >
+          The gap between the header's own split and the lines'. Reported, not
+          plugged. See the model header.
+        tests: [not_null]
+      - name: entity_code
+        tests: [not_null]
+
+  - name: revenue_entity_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, entity, currency_key]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: entity
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['CL-US', 'CL-GB', 'CL-IE', 'CL-DE', 'CL-MX']
+
+  - name: comp_sales_daily
+    description: contracts/comp_sales_daily.yml, consumer C-5.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, region]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: region
+        tests: [not_null]
+      - name: comp_sales_cents
+        tests: [not_null]
+      - name: comp_date_ly
+        tests: [not_null]
+      - name: comp_store_count
+        tests: [not_null]
+
+  - name: account_rollup
+    description: contracts/account_rollup.yml, consumer C-1.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [fiscal_month, entity, customer_id, account_key]
+    columns:
+      - name: fiscal_month
+        tests: [not_null]
+      - name: entity
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['CL-US', 'CL-GB', 'CL-IE', 'CL-DE', 'CL-MX']
+      - name: reported_cents
+        tests: [not_null]
+      - name: active_accounts
+        tests: [not_null]
+
+  - name: category_margin
+    description: >
+      Reads marts.order_economics, which commerce owns. See the model header.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [fiscal_month, cost_center_key, category_id, channel_key]
+    columns:
+      - name: fiscal_month
+        tests: [not_null]
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: ar_aging_daily
+    columns:
+      - name: aging_band
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['current', '1-30', '31-60', '61-90', '90+']
+      - name: open_cents
+        tests: [not_null]
+
+  - name: board_revenue_weekly
+    columns:
+      - name: week_start
+        tests: [not_null]
+      - name: comp_sales_cents
+        tests: [not_null]
+
+  - name: tax_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, geography_key, currency_key]
+    columns:
+      - name: tax_cents
+        tests: [not_null]
+      - name: taxable_cents
+        tests: [not_null]
+
+  - name: cash_recon_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, entity, currency_key]
+    columns:
+      - name: cash_cents
+        tests: [not_null]
+      - name: shadow_overlap_cents
+        tests: [not_null]
+
+  - name: revenue_by_book
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [fiscal_month, entity, source_book]
+    columns:
+      - name: source_book
+        tests:
+          - accepted_values:
+              values: ['copperline', 'northwave']
+      - name: invoiced_cents
+        tests: [not_null]
+
+  - name: agg_pnl_by_cost_center
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [fiscal_month, cost_center_key]
+    columns:
+      - name: cost_center_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_cost_center')
+              field: cost_center_key
+      - name: net_sales_cents
+        tests: [not_null]

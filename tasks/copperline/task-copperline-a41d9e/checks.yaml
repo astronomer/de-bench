@@ -1,0 +1,163 @@
+# The ticket points at `ops/runbooks/alerting.md` and the runbook is wrong. It
+# prescribes `email`, `email_on_failure` and `email_on_retry` in `default_args`,
+# and this Airflow takes a default_args key only when the operator's signature
+# has a parameter of that name (`BaseOperator.apply_defaults`). These three are
+# accepted, dropped and never mentioned again, which is why three failed runs
+# reached nobody. The overlay is that wiring: it takes `on_failure_callback`
+# and the `include.lib.notify` import out of the DAG the world ships correct,
+# and puts the runbook's three keys in their place.
+#
+# WHERE THE TRUTH IS, and why pointing at the trap is fair here. Four places
+# say it, none of them the ticket:
+#
+#   CONVENTIONS.md, Airflow rule 11    `on_failure_callback=notify("<team>")`
+#                                      from include/lib/notify.py, on the DAG.
+#                                      The system prompt says to read this file
+#                                      first.
+#   every other DAG in the six team    91 files under projects/*/dags/ hang
+#   projects                           notify() in default_args, and the only
+#                                      email parameters in the tree are in
+#                                      legacy/northwave-airflow/, which is the
+#                                      acquired company's frozen Airflow 1.10
+#                                      estate and read-only under CONVENTIONS.md.
+#   contracts/alerting.md, Notes       names this runbook and says to check its
+#                                      review date first, per CM-4.
+#   docs/change-management.md          CM-3: where a runbook and the code
+#                                      disagree, the code is right. CM-4: a
+#                                      runbook 180 days past review is out of
+#                                      date by default. The runbook's header
+#                                      says 2025-06-30 and the world's date is
+#                                      2026-06-15, which is 350 days.
+#
+# THE WRONG ANSWERS, AND WHAT CONVICTS EACH:
+#
+#   follow the runbook — keep the      the alert log check: the parameters are
+#   email parameters, or re-place      dropped, so a failed run writes nothing
+#   them on the task                   and the file is not there to read
+#   add notify() and leave the email   the file_lacks: the ticket says one way,
+#   keys beside it                     not two
+#   notify("data-platform"), from the  dag_parses: notify() raises ValueError on
+#   runbook's address table or the     a team it does not know, and an exception
+#   DAG's own "Owned by data-platform" at import takes the whole DagBag down.
+#                                      Three of the runbook's six labels do name
+#                                      a team (commerce, growth, customer); on
+#                                      this DAG any of them parses and then
+#                                      fails the alert log check, which reads
+#                                      the team off the record
+#   an SmtpNotifier from the smtp      the alert log check: nothing lands in
+#   provider instead                   include/data/_notifications/, and no SMTP
+#                                      connection exists in config/iac/ for it
+#                                      to send through
+#   rotate the dates, or create the    dag_fails, and config/iac/** is protected.
+#   missing table, to make it green    The ticket says the run stays red and
+#                                      names the two other tickets that own it
+#   delete the DAG, or drop the task   dag_parses and dag_structure
+#   that raises
+#   read the legacy Northwave DAGs as  the alert log check and the file_lacks,
+#   the precedent and keep the email   the same two that convict the runbook
+#   keys                               answer. They are Airflow 1.10 files under
+#                                      legacy/, they are not in the bag, and
+#                                      their mail went to a company that no
+#                                      longer exists
+#
+# WHAT PASSES THAT IS NOT THE REFERENCE FIX, and is accepted:
+#
+#   notify() hung on record_and_flag   CONVENTIONS.md rule 11 says the DAG, and
+#   rather than in default_args        a callback on one task is a callback
+#                                      somebody forgets on the next one. But the
+#                                      ticket asks for a failed run to reach the
+#                                      on-call, this run fails in that task, and
+#                                      it does reach them. The ticket is the
+#                                      contract.
+#   a hand-written callback that       the same record lands, so the alert log
+#   writes the same record             check cannot tell them apart and should
+#                                      not: the ticket states an outcome. It is
+#                                      worse code and no document forbids it.
+#
+# Nothing here holds an authored value. The alert log is graded by the record
+# the failure itself writes, and 2026-06-15 is the world's own date and sits
+# outside the reserved window (2026-06-01..09).
+replay: []
+
+checks:
+
+# The Monday check still imports, and the DagBag is clean. This is what a team
+# name notify() does not recognize fails on: it raises at import.
+- kind: dag_parses
+  dag_id: plat_secret_rotation_check
+
+# Three steps: read the declared connections, classify them, write the week's
+# record and raise. Deleting the third is the cheapest way to stop the run
+# failing, and the cheapest way to stop it notifying.
+- kind: dag_structure
+  dag_id: plat_secret_rotation_check
+  task_ids:
+  - read_declared
+  - classify
+  - record_and_flag
+
+# The run still surfaces as failed. The ticket says the red belongs to SEC-118
+# and PLAT-429 and stays until they are done, so an answer that quiets the run
+# has delivered the opposite of what was asked.
+- kind: dag_fails
+  dag_id: plat_secret_rotation_check
+  ds: '2026-06-15'
+
+# What the failure left behind. `include/lib/notify.py` writes one JSON object a
+# line to `include/data/_notifications/<dag_id>.jsonl` every time it pages, and
+# the file is the only evidence in the tree that a person was told. It is
+# excluded from the patch (modal_app's `_add_excludes`), so nothing an agent
+# leaves behind can stand in for it: this file exists only if the run above
+# wrote it, under the fix, in this container.
+#
+# Both fields are the world's, not the author's: the dag_id is the DAG's own and
+# the team is the one the DAG's `owner` and the runbook's own rule both name.
+- kind: file_contains
+  path: include/data/_notifications/plat_secret_rotation_check.jsonl
+  matches:
+  - '"dag_id": "plat_secret_rotation_check"'
+  - '"team": "platform"'
+
+# The dead wiring is gone. Comments and docstrings are stripped before this
+# reads, so a note saying what was removed and why is safe.
+- kind: file_lacks
+  path: projects/platform/dags/plat_secret_rotation_check.py
+  patterns:
+  - 'email_on_failure'
+  - 'email_on_retry'
+  - '["'']email["'']'
+
+# The write-up. Patterns are matched case-insensitively under re.DOTALL and are
+# written loose: each pins a name or a stated fact, never a phrasing.
+
+# The diagnosis. Naming the parameter is not enough — a reply that says it was
+# set has not said why nothing arrived. The negation is what separates reading
+# the runtime from restating the file. Both readings of the mechanism pass:
+# "the runtime drops the key" and "there is nothing configured to send it" end
+# in the same place, which is that the alert does not exist.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'email'
+  - '(ignor|inert|dead|no effect|does nothing|did nothing|never sen|not sen|nothing send|no smtp|not support|no longer|removed|dropped|discard|silent)'
+
+# What was delivered. The house helper, on the failure callback, addressed to
+# the rotation that owns the DAG.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'on_failure_callback'
+  - 'notify'
+  - 'platform'
+
+# The runbook, and what happens to it. The ticket names the runbook, so naming
+# it back is free; the second pattern is the earned half. It asks the reply to
+# resolve the conflict the way the house resolves it — CM-3, CM-4, the review
+# date, or the statement that the runbook no longer describes the code — rather
+# than by asserting the runbook is wrong because the fix was copied from a
+# neighbouring file.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'alerting\.md'
+  - '(CM-3|CM-4|review date|reviewed|2025-06-30|180 days|out of date|outdated|stale|superseded|canonical|advisory|no longer|predates|airflow ?2)'

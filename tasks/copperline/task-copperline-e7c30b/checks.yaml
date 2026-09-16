@@ -1,0 +1,144 @@
+# The doubling is one statement: `projects/commerce/sql/settlement_publish.sql`
+# is a bare `INSERT INTO copperline.marts.settlement_weekly`, with nothing to
+# remove the week that is already there. Its own comment says it replaces the
+# week, `CONVENTIONS.md` "Writing to the warehouse" calls the shape a defect,
+# and `contracts/settlement-summary.md` SS-3 states the rule it breaks. The
+# world ships it that way; nothing here is planted.
+#
+# What makes it more than a one-liner is the second candidate on the same path.
+# `apply_processor_boundary` sits one step above the publish, its comment says
+# the same money reaches us twice, and it is genuinely broken —
+# `settlement_week_lines.sql` stamps every row `'marketplace'` and the DELETE
+# only looks for `'processor'`, so the step has never removed a row. It is the
+# obvious answer and it is the wrong one: the overlap it is written for ended
+# 2025-09-01 (`docs/billing-integration.md` B-8) and the week that doubled is
+# February 2026. The ticket puts that reading in the agent's hands on purpose.
+#
+# The other half of the find is the calendar. Seller-ops re-ran seven dates,
+# 2026-02-02 to 2026-02-08, and `week_bounds` sends every one of them to the
+# fiscal week that opened 2026-02-01 — so the replay wrote one week nine times
+# rather than seven weeks once each.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.marketplace_settlements` and `raw.marketplace_payouts` in
+# the same session, over the window the patched `week_bounds` returns.
+#
+# WHY NOTHING RUNS THE DAG. `AGENTS.md`, "The warehouse": the world ships the
+# landed half only, so `staging.*` and `marts.*` are not on disk. This DAG
+# cannot build them here either — `apply_fee_schedule` reads
+# `staging.fee_schedule` and no job in this tree writes it — so `airflow dags
+# test payment_settlement_weekly` stops at the fee step however the publish is
+# repaired. The ticket says so and puts the fee step out of scope. The verifier
+# stands up the two schemas and the one mart table and drives the two steps the
+# ticket names, which grades the same code in seconds.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code change   verifier: the second run
+#                                                     of the week
+#   the boundary step "fixed" and the publish left    verifier: same
+#   a DISTINCT added to the export or the summary     verifier: the mart is read,
+#                                                     not the file
+#   the mart replaced whole (CREATE OR REPLACE, or    verifier: the other week
+#     a DELETE with no week in it)                    disappears
+#   the delete keyed on seller rather than on week    verifier: same
+#   the publish made a no-op when the week is there   verifier: the replay that
+#                                                     has to rewrite the week
+#   the week hard-coded, or February special-cased    verifier: 2026-05-16
+#   the fee or the boundary step deleted to get green dag_structure
+#   the DAG or the statement broken                   dag_parses
+#   "the two feeds are double-counted"                file_contains: the
+#                                                     overlap has to be ruled
+#                                                     out, with a reason
+#   "the week ran twice, so it doubled twice"         file_contains: the seven
+#                                                     dates are one week
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES, and should. The ticket asks for the
+# write, not the window, so `week_bounds` is not graded: a reply that also
+# widens the run's window to the seven days its docstring claims is measured
+# against its own window and passes. That is fair — the window is a second
+# defect on the same DAG, and repairing it does not repair the doubling.
+#
+# The graded run dates are 2026-02-08 and 2026-05-16. The ticket names the
+# first only as one of the dates seller-ops re-ran, and never names the second.
+replay: []
+
+checks:
+
+# The tree still imports, and the DAG is still there.
+- kind: dag_parses
+  dag_id: payment_settlement_weekly
+
+# The seven steps, which the ticket says stay as they are. This is the guard
+# against passing by deletion: dropping `apply_processor_boundary` because it
+# does nothing, or dropping `check_grain` because it is what would have caught
+# the doubling, changes the DAG's contract with everything downstream.
+- kind: dag_structure
+  dag_id: payment_settlement_weekly
+  task_ids:
+  - build_week
+  - apply_processor_boundary
+  - apply_fee_schedule
+  - publish_week
+  - check_grain
+  - tie_to_payouts
+  - export_summary
+  operators:
+    build_week: PythonOperator
+    apply_processor_boundary: PythonOperator
+    apply_fee_schedule: PythonOperator
+    publish_week: PythonOperator
+    check_grain: PythonOperator
+    tie_to_payouts: PythonOperator
+    export_summary: PythonOperator
+
+# The substance. See verifier/test_outputs.py — two weeks, the week published
+# twice, the neighbouring week left alone, and the replay that still has to
+# rewrite the figures it was asked to correct.
+- kind: pytest_verifier
+  file: test_outputs.py
+
+# The note commerce asked for. Patterns are matched case-insensitively with
+# re.search and are written loose on purpose: each pins a named thing or a
+# figure, never a phrasing.
+
+# Which statement. Naming the file or the step, and saying what is wrong with
+# it — a reply that names the DAG and stops has not told seller-ops anything.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(settlement_publish|publish_week)'
+  - '(bare insert|insert into|appends?|adds to|added to|adding to|does not (delete|replace|remove)|never (delete|replace|remove)s?|without (a )?delete|no delete)'
+
+# Which week the seven dates land on, and that they are one week. This is the
+# calendar half of the find: `week_bounds` reads `raw.fiscal_calendar`, and
+# 2026-02-01 to 2026-02-07 is one fiscal week. The ticket never gives the date.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(2026-02-01|1 february|february 1|1st february|february 1st)'
+  - '(one (fiscal )?week|the same (fiscal )?week|a single (fiscal )?week|same week|all (seven|7)[^\n]{0,80}(same|one|2026-02-01))'
+
+# The overlap, ruled out with a reason. Three patterns because a verdict with
+# no reason behind it is a guess: name the suspect, give the fact that clears
+# it, and say it is cleared. Any one of the facts does — that the boundary
+# deletes nothing because every row is stamped `marketplace`, or that the
+# overlap ended in September 2025, or that one feed cannot double itself.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(settlement_boundary|apply_processor_boundary|two[- ]feed|overlap)'
+  - "(2025-09|september 2025|'processor'|feed[^\\n]{0,25}processor|processor[^\\n]{0,25}feed|deletes nothing|never delete|nothing to delete|no processor|only[^\\n]{0,30}marketplace|all[^\\n]{0,35}marketplace|one feed|single feed|outside[^\\n]{0,30}overlap|not[^\\n]{0,30}overlap)"
+  # The verdict is anchored to the suspect it clears: unanchored, "the
+  # boundary is not what the docstring says" — a claim about the docstring,
+  # not a ruling on the cause — satisfied this.
+  - '((settlement_boundary|apply_processor_boundary|two[- ]feed|overlap|boundary)[\s\S]{0,300}(not the cause|ruled? (it )?out|innocent|not to blame|cannot (be|have)|nothing to do with|unrelated|rules? it out|clears? it)|(not the cause|ruled? (it )?out|innocent|not to blame|nothing to do with|unrelated|rules? it out|clears? it)[\s\S]{0,300}(settlement_boundary|apply_processor_boundary|two[- ]feed|overlap|boundary))'
+
+# How far it reaches. The ticket asks whether anything else in commerce
+# publishes the same way, and the answer is that seven other statements do. A
+# reply that repairs the settlement summary and says nothing about the shape
+# has answered the symptom rather than the question.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(economics_publish|returns_publish|refunds_publish|cart_abandon_publish|recon_publish|close_publish_economics|payments_restore_day|order_economics|fct_returns|refunds_daily|cart_abandon_daily|recon_exceptions|fct_payments|every publish|all[^\n]{0,25}publish|other publish|same (shape|pattern|way|defect|bug|problem)[^\n]{0,80}(publish|commerce|mart))'

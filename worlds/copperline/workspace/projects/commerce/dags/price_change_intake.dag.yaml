@@ -1,0 +1,36 @@
+dag_id: price_change_intake
+schedule: "0 1 * * *"
+description: PIM price and attribute changes into raw.pim_product_versions
+default_args:
+  owner: commerce
+  retries: 2
+tags: [commerce, raw, intake, pim]
+steps:
+  # The change feed arrives out of order with no bound, and a change is
+  # re-sent when the PIM is corrected, so the grain is `change_id` and not a
+  # date. The stage is emptied by the run that owns it and the merge keys on
+  # the change id. The snapshot orders on the source's own change stamp.
+  reset_stage:
+    blueprint: sql_file
+    statement: price_change_reset_stage
+  land:
+    blueprint: csv_intake
+    depends_on: [reset_stage]
+    source: pim/dt={{ ds }}/changes.csv
+    table: staging.pim_changes
+    columns:
+      change_id: VARCHAR
+      sku: VARCHAR
+      list_price_cents: BIGINT
+      updated_at: TIMESTAMP
+      received_at: TIMESTAMP
+      source: VARCHAR
+  merge:
+    blueprint: sql_file
+    depends_on: [land]
+    statement: price_change_merge
+  snapshot:
+    blueprint: dbt_select
+    depends_on: [merge]
+    command: snapshot
+    select: snap_product_price

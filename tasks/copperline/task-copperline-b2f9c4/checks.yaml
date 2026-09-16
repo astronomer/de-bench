@@ -1,0 +1,137 @@
+# The whole ticket is one question: which days does tonight's delivery change?
+#
+# Meridian delivers hourly and about 92% of a settlement day's events arrive on
+# the day they happened; the rest arrive over the following five days.
+# `docs/billing-integration.md` B-5 states it, `docs/late-data-policy.md` LD-1
+# asks for the measured lag of the source and says not to copy a window from
+# another model, and the two timestamps on every row are the measurement. So a
+# night carries rows for six settlement days and five of those days have
+# already been published.
+#
+# The trap is the habitual three-day window. Two DAGs in the world carry
+# `LOOKBACK_DAYS = 3` — `store_pos_late_catchup`, where three days is the right
+# number for a source whose FILES are late and whose rows never are, and
+# `gro_funnel_daily`, where the clickstream's bound is hours. Copied onto this
+# feed, three days leaves every published day short of the rows that arrive on
+# the third day and after. That is about 1.7% of them, and about 7.6% arrive
+# late at all: the shares are `late_tail.default` in the world's timeline —
+# 0.924 on the day, then 0.041, 0.018, 0.009, 0.005, 0.003 — and a count over
+# `date_diff('day', event_time_utc, loaded_at)` reads them back. The day count
+# stays plausible, the currencies stay right, every day is short in the same
+# direction, and the money moves by around a per cent, which is the size of
+# thing a spreadsheet reconciliation has never once found.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.pay_meridian_settlements` in the same session, and its first
+# test proves the graded span can still tell the answers apart.
+#
+# WHY NOTHING RUNS THE DAG. The subject is what twelve nights in a row leave
+# behind. Twelve scheduler runs to grade two queries buys nothing the direct
+# call does not, and it costs a scheduler. The verifier calls
+# `card_settlement.load_delivery(ds)` itself, night after night in order, which
+# also removes the shortcut: a day typed into the table by hand is a day the
+# next night replaces before anything reads it.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered                       verifier: the import fails
+#   a fixed three-day lookback over the      verifier: the replay test. Every
+#     settlement days                        graded day is short by the rows
+#                                            that arrived on the third night
+#                                            and after, and most of the graded
+#                                            figures move
+#   a fixed lookback of any width under      verifier: the replay test, the
+#     six days                               same way
+#   no lookback at all: the day built on     verifier: the replay test. Short
+#     the day and never revisited            by the whole late tail
+#   the day taken from `loaded_at`           verifier: the replay test. The
+#                                            figures land on the night the
+#                                            rows arrived rather than the day
+#                                            they happened
+#   the day rebuilt from the night's own     verifier: the replay test and the
+#     rows alone                             as-at test. A day revisited on
+#                                            its fifth night is left holding
+#                                            the handful of rows that arrived
+#                                            that night. `include/lib/warehouse.py`
+#                                            names this one: a partition write
+#                                            takes the whole partition
+#   the rows appended rather than the day    verifier: the replay test — the
+#     replaced                               day carries two rows per currency
+#   the whole feed rebuilt every night       verifier: the untouched-day test.
+#                                            The ticket forbids it and
+#                                            `projects/platform/README.md`
+#                                            says why
+#   the rebuild reading past the night it    verifier: the as-at test. The
+#     is running                             ticket states the rule and gives
+#                                            the reason
+#   restatements or soft-deleted rows        verifier: the replay test. The
+#     filtered out                           ticket says every row counts once
+#   `amount_cents` summed into one total     verifier: the replay test. The
+#     rather than by event type              three money columns are named
+#                                            after the types they carry
+#   authorizations dropped from `events`     verifier: the replay test. The
+#                                            ticket counts every row the feed
+#                                            carries
+#   days corrected by hand in the table      verifier: it runs the nights
+#                                            itself first
+#   a row of zeros minted for every          verifier: the replay test. The
+#     currency on every day                  currencies come off the rows the
+#                                            feed carries and no others
+#   the DAG or the module broken             dag_parses
+#   the two steps collapsed into one         dag_structure
+#
+# WHAT IS NOT CONVICTED, on purpose:
+#
+#   * A build that carries extra columns beyond the six the ticket lists. The
+#     verifier selects the six by name, and plants its untouched-day row by
+#     copying one the build wrote, so a wider table is planted into as happily
+#     as a narrow one.
+#   * A build that publishes the day as a partition file beside the table, or
+#     writes a staging table of its own on the way. Nothing here looks at
+#     either.
+#   * Which day the DAG hands to `load_delivery`. `CONVENTIONS.md` holds a
+#     daily job back one day and the solution does, but a run that loads
+#     `{{ ds }}` is loading the same table by the same rule, and nothing here
+#     looks at `op_kwargs`.
+#   * Extra steps in the DAG. `dag_structure` names the two the ticket asks
+#     for; a sensor in front of them is a reasonable thing to add.
+#   * How the days to rebuild are found. Taking them from the delivered rows
+#     passes, and so does rebuilding a window wide enough to cover the tail —
+#     six days, or thirty. The wide window is waste and the policy says so, but
+#     it loses nothing, and the ticket asks for the figures rather than for a
+#     method. Only a window narrower than the source's own tail is convicted.
+#   * A rebuild that re-reads the feed rather than accumulating what it has
+#     already loaded, as long as it bounds the read at its own night.
+#
+# The graded settlement days are 2026-04-20 to 2026-04-26 and the replay runs
+# the nights 2026-04-20 to 2026-05-01. The ticket names none of them and no
+# date at all. The span sits outside both reserved windows, outside the 2025
+# processor overlap quarter, and outside FY2026-P04, which the close task
+# grades.
+replay: []
+
+checks:
+
+# The new DAG renders and the bag still has no import errors.
+- kind: dag_parses
+  dag_id: card_settlement_daily
+
+# The two steps the ticket asks for, as operators. `check_days` exists to make
+# a short night loud in the DAG's own log rather than in the cash sheet at the
+# end of the month; folding it into the load removes the only thing that would
+# catch the shortfall at all.
+- kind: dag_structure
+  dag_id: card_settlement_daily
+  task_ids:
+  - load_delivery
+  - check_days
+  operators:
+    load_delivery: PythonOperator
+    check_days: PythonOperator
+
+# The substance. See verifier/test_outputs.py — twelve nights in order, seven
+# settlement days the ticket does not name, the day as at the night that built
+# it, a re-run, and a day no delivery reached.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

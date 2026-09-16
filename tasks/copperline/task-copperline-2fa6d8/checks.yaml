@@ -1,0 +1,158 @@
+# The settlement feed is written from the operator's side and `int_settlement_
+# matched` reads one line of it backwards. The principal line is the whole order
+# value owed to the seller and signs negative; the commission and the fulfilment
+# fee sign positive and are Copperline's take, held back before the payout
+# leaves. So the principal reconstructs `gmv_cents` on its own.
+#
+# The tie adds all three magnitudes together instead, which counts the take into
+# the seller's order, and it therefore disagrees with every settled order by
+# exactly the take. `int_settlement_matched` makes the same reading in its own
+# comment — "the principal is already net of them" — and so `seller_net_cents`,
+# and everything summed from it, hands the seller the gross order value.
+#
+# Two more things fall out of the same pivot. The refund line posts with the
+# payout run three weeks after the one that carried the commission, so a pivot
+# keyed on the payout as well as the order emits a refunded order twice; and
+# `raw.marketplace_payouts.net_paid_cents` is the platform's own sum of the lines
+# it paid, which is the third feed the answer can be measured against and the
+# one nobody in the world has ever compared the model to.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier computes every expected
+# result from the three raw marketplace tables in the same session — the row
+# count, the order value, what the seller kept and the payout total. The row
+# counts in the world's own notes come from a smaller build of it and are not
+# used, on purpose.
+#
+# WHY DBT RUNS. `int_settlement_matched` is a view and the world ships the landed
+# half of the warehouse only, so the relation does not exist until dbt has made
+# it. The prepare step builds it and the two published marts that read it — nine
+# models, about a second. No DAG replays.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   widen the tolerance to swallow the take   file_contains: the 100-cent
+#                                             allowance on the tie
+#   drop the tie to a warning                 file_lacks on the tests directory,
+#                                             file_contains on dbt_project.yml
+#   delete the tie                            file_contains on its path, and the
+#                                             verifier selects it by name
+#   empty the tie to `where false`            file_lacks, and the mutation test
+#   compare gmv_cents against itself          the mutation test
+#   take the principal from the order header  the mutation test: the moved line
+#     rather than from the settlement line    never reaches the comparison
+#   redefine gmv_cents as the net             verifier: the order value is not
+#                                             restated
+#   filter the model to settled orders only   verifier: one row per landed order
+#   leave the pivot keyed on the payout       verifier: one row per order, and
+#                                             the refunded orders come twice
+#   fix the tie and leave seller_net_cents    verifier: what the seller kept,
+#                                             order by order, and the payout tie
+#   "the feed is incomplete, re-extract it"   verifier: nothing is fixed, and the
+#                                             oracle's own first test says every
+#                                             settled order has all its lines
+#   a column the readers select dropped       verifier: the two marts that read
+#     from the pivot                          the model still build
+#   a note and no code change                 every verifier test
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES. The ticket does not say which columns the
+# tie has to compare, only that the reconstruction must hold and must still go
+# red when a line breaks. A tie written as `gmv_cents` against `principal_cents`
+# passes, and so does one written as `gmv_cents` against `seller_net_cents` with
+# the take added back. Both are the same reading and both go red on the mutated
+# line. That is the contract the ticket wrote and neither is convicted here.
+
+replay: []
+
+checks:
+
+# The substance: the model against the three feeds, and the tie against a
+# settlement line moved off its order. See verifier/test_outputs.py.
+- kind: pytest_verifier
+  file: test_outputs.py
+  prepare:
+  - cd dbt/copperline_analytics && /opt/dbt-venv/bin/dbt run --select +gmv_daily +settlement_weekly --profiles-dir .
+  timeout: 900
+
+# The tie is still there, still reads the model, and still carries the allowance
+# the contract set. `\b` after the 100 is what stops 10000 passing as 100. The
+# second pattern names the two columns that carry the settlement side of the
+# reconstruction and takes either, because either one states it: the principal
+# against the order, or the seller's net with the take added back. Which side of
+# the comparison the writer puts it on is not graded.
+- kind: file_contains
+  path: dbt/copperline_analytics/tests/commerce/tie_gmv_settlement_reconstructs_order.sql
+  matches:
+  - "ref\\(\\s*['\"]int_settlement_matched['\"]\\s*\\)"
+  - '(principal_cents|seller_net_cents)'
+  - '>\s*100\b'
+
+# The cheap ways to make a red test green without answering it. The glob is the
+# whole commerce tie directory, so the same move made in a sibling tie is caught
+# too. Only the warning value and the two thresholds are named, so a test that
+# says `severity='error'` out loud is not convicted for being explicit.
+- kind: file_lacks
+  path: dbt/copperline_analytics/tests/commerce/*.sql
+  patterns:
+  - "severity\\s*[=:]\\s*['\"]?warn"
+  - 'warn_if'
+  - 'error_if'
+  - '\bwhere\s+false\b'
+  - '\b1\s*=\s*0\b'
+  - '\blimit\s+0\b'
+
+# The suite-wide severity. One word under `tests:` in the project file turns all
+# 625 tests into warnings and the nightly stops meaning anything.
+- kind: file_contains
+  path: dbt/copperline_analytics/dbt_project.yml
+  matches:
+  - '\+severity:\s*error'
+
+# The four lines for the DQ-77 thread. Patterns are matched case-insensitively
+# with re.search and are written loose on purpose: each pins a fact or a name,
+# never a phrasing, and a table row satisfies them as readily as a sentence.
+
+# Line one and line two, which are one finding: the tie added the take to the
+# order instead of taking it off, so what it has been reporting as a variance is
+# Copperline's own revenue. The first pattern wants the take named as the two
+# things it is made of or by its own name; the second wants the direction, which
+# is the whole of the answer. A reply that says "the numbers do not add up" and
+# stops has not made the argument.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(take[ -]?rate|our take|the take|commission[^\n]{0,60}(and|plus|\+)[^\n]{0,60}(fulfilment|fulfillment)|(fulfilment|fulfillment)[^\n]{0,60}(and|plus|\+)[^\n]{0,60}commission)'
+  # "oversho" joined the list after a trace audit: an agent wrote "the
+  # right-hand side overshot the order by the take" — the finding, in a word.
+  # It is anchored to the order because bare "overshoot" carries no polarity:
+  # "the fees overshoot what the settlement lines carry" is the reverse
+  # reading and matched the unanchored word.
+  # the first alternation missed.
+  - '(double[- ]?count|counted twice|twice over|overstat|oversho\w*[^\n]{0,60}(order|gmv|seller.s order)|too (high|much|big|large)|(add|sum)\w*[^\n]{0,80}(instead of|rather than|when (it|they) should|where it should|not (be )?(subtract|deduct))|(subtract|deduct|taken off|comes? off|held back|net(ted)? off|withheld)[^\n]{0,80}(instead of|rather than|not add|before))'
+
+# That it is every settled order and not a tail. The ticket says so, so a reply
+# that reaches the cause has this; what it convicts is a reply that reports a
+# subset and calls the rest fine.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(every|all|each)[^\n]{0,40}settled[^\n]{0,30}order'
+
+# Line three: what the principal line is. This is the sentence the whole ticket
+# turns on and it is in no document — it is read off the feed. The two patterns
+# want the column named and the reading stated: the gross order value, not the
+# seller's net.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'principal'
+  - '(gross|full order value|whole order|entire order|not net|never net|before[^\n]{0,40}(take|commission|fee)|equals?[^\n]{0,30}gmv|is[^\n]{0,20}the[^\n]{0,20}gmv|= *gmv)'
+
+# Line four: how far the same reading reaches. `seller_net_cents` is summed into
+# `marts.gmv_daily` and into `marts.settlement_weekly.payout_cents`, and neither
+# is named in the ticket. An agent that fixed the model without ever asking who
+# reads it cannot answer this.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(settlement_weekly|gmv_daily)'
+  - '(payout_cents|seller_net_cents)'

@@ -1,0 +1,28 @@
+dag_id: psp_bridge_build
+schedule: "0 3 * * *"
+description: the payment-intent bridge that joins a settlement back to its order
+default_args:
+  owner: commerce
+  retries: 2
+tags: [commerce, staging, payments]
+steps:
+  wait_for_events:
+    blueprint: sensor_wait
+    asset: raw.pay_meridian_settlements
+    partition_col: settlement_date
+    timeout: 5400
+    poke_interval: 300
+  build:
+    blueprint: dbt_select
+    depends_on: [wait_for_events]
+    select: stg_payment_intents
+  test:
+    blueprint: dbt_select
+    depends_on: [build]
+    command: test
+    select: stg_payment_intents
+  check_attempts:
+    blueprint: sql_file
+    depends_on: [test]
+    statement: psp_bridge_attempt_check
+    params: ["{{ ds }}"]

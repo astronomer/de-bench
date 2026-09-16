@@ -1,0 +1,4 @@
+apache-airflow==3.0.0
+apache-airflow-providers-snowflake>=6.0.0
+apache-airflow-providers-postgres>=6.0.0
+apache-airflow-providers-common-sql>=1.20.0

@@ -1,0 +1,96 @@
+version: 2
+
+models:
+
+  - name: fct_web_sessions
+    columns:
+      - name: session_key
+        tests: [unique, not_null]
+      - name: date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: attributed_source
+        tests: [not_null]
+
+  - name: funnel_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, attributed_source, device]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: sessions
+        tests: [not_null]
+
+  - name: channel_roi_daily
+    description: >
+      Reads marts.gmv_daily, which commerce owns. That crosses an ownership
+      boundary the stated rules forbid; see the model header.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, platform, campaign_id, geography_key, channel]
+    columns:
+      - name: spend_cents
+        tests: [not_null]
+      - name: fx_rate_ppm
+        tests: [not_null]
+      - name: fx_rate_date
+        tests: [not_null]
+      - name: currency_key
+        tests:
+          - relationships:
+              to: ref('dim_currency')
+              field: currency_key
+
+  - name: agg_promo_performance
+    columns:
+      - name: promo_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_promotion')
+              field: promotion_key
+      - name: orders_eligible
+        tests: [not_null]
+
+  - name: agg_price_realization
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku, channel_key]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: paid_cents
+        tests: [not_null]
+
+  - name: email_engagement_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, campaign_id]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: sends
+        tests: [not_null]
+
+  - name: audience_segments
+    description: contracts/audience_segments.yml, consumer C-6. Leaves the building.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, segment_id, customer_id]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: segment_id
+        tests: [not_null]
+      - name: customer_id
+        tests: [not_null]
+      - name: contact_hash
+        tests: [not_null]
+      - name: consent_state
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['granted', 'withdrawn']

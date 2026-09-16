@@ -1,0 +1,5 @@
+{
+  "airflow": "3.2",
+  "providers": {"google": "22"},
+  "rationale": "Execution-verified against Airflow 3.2: the current google 8 pin does not install. google's first AF3.2-capable major is 16 (8-15 fail to resolve/install), so it must bump to 16-22 (latest 22) for the pin set to install cleanly."
+}

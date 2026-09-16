@@ -1,0 +1,62 @@
+# The competitor price feed. Prospect Retail Intelligence drop one file a
+# morning per market at about 05:40; we land it at 06:00 and the price index
+# reads it at 07:00.
+#
+# The file is a delivery, not a day of history: it holds the prices observed
+# on the day it is named for. So the load replaces that day's partition and a
+# second run of the same day leaves one copy.
+dag_id: gro_comp_prices_intake
+schedule: "0 6 * * *"
+description: competitor prices for the day, landed and staged
+start_date: 2026-01-05
+tags: [growth, pricing, intake, blueprint]
+default_args:
+  owner: growth
+  retries: 2
+
+steps:
+  wait_for_drop:
+    blueprint: sensor_wait
+    file: "landing/comp_prices/dt={{ ds }}/_SUCCESS"
+    poke_interval: 300
+    timeout: 5400
+    mode: reschedule
+
+  land_prices:
+    blueprint: csv_intake
+    depends_on: [wait_for_drop]
+    source: "comp_prices/dt={{ ds }}/prices.csv"
+    table: raw.comp_prices
+    mode: replace
+    partition_col: observed_on
+    columns:
+      observed_on: DATE
+      market_code: VARCHAR
+      lane_id: VARCHAR
+      competitor: VARCHAR
+      sku: VARCHAR
+      price_cents: BIGINT
+      currency_code: VARCHAR
+
+  stage_prices:
+    blueprint: dbt_select
+    depends_on: [land_prices]
+    select: stg_ecommerce__comp_prices
+
+  compare_prices:
+    blueprint: dbt_select
+    depends_on: [stage_prices]
+    select: int_price_compared
+    vars:
+      run_date: "{{ ds }}"
+
+  lane_coverage:
+    blueprint: rollup
+    depends_on: [land_prices]
+    source: raw.comp_prices
+    group_by: [market_code, competitor]
+    agg: count_distinct
+    column: lane_id
+    as: lanes_quoted
+    target: ops.comp_price_coverage
+    partition_col: observed_on

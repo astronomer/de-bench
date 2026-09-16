@@ -1,0 +1,96 @@
+# The ticket is a build: one job, one table, one window. The work is the day on
+# the row, and the window is chosen so that no single timestamp gives it.
+#
+#   1. THE FIRST PERIOD HAS NO UTC STAMP. `raw.pos_sales_header.event_time_utc`
+#      is NULL on every transaction before 2025-11-03. A pack keyed on it holds
+#      nothing at all for 2025-10-05 to 2025-11-02.
+#   2. THE PRE-CUTOVER LOCAL STAMP IS A CLOSE BATCH, NOT A SALE. The registers
+#      held the day and posted one batch at 23:05 in the store's own clock, so
+#      rebuilding a UTC day out of `event_time_local` and `raw.stores.tz_name`
+#      moves the whole night of every Americas store onto the day after it.
+#   3. AFTER THE CUTOVER THE UTC DATE IS STILL NOT THE TRADING DAY. An evening
+#      sale's UTC date runs a day ahead on the same estate, so a reading that
+#      switches on the era lands the same error on the second period.
+#
+#   The trading day is `business_date`, on both sides, and the tree says so in
+#   three places the ticket names none of: `docs/runbooks/pos-ingestion.md`
+#   POS-2 and its "things that look like problems and are not" list, the
+#   docstring on `stg_store__pos_sales_header`, and `agg_daily_store_sales`,
+#   which groups the till on it. Finding that is the task.
+#
+# THE WINDOW. FY2025 periods 9 and 10, 2025-10-05 to 2025-11-29, which the
+# standardization falls inside. It holds 14,317 store-days over 197,823
+# transactions; 59,789 of those transactions predate the standardization and
+# carry no UTC stamp, 37,319 of them sit on a night the converted local stamp
+# reads as the next day, and 24,319 after the standardization carry a UTC date
+# that is not the trading day. Every one of those figures is derived from
+# `raw.pos_sales_header` and `raw.stores`, and none of them is authored
+# anywhere a check reads — the verifier recomputes all of it in the same
+# session, and its first test fails loudly if any of the populations empties.
+#
+# THE WRONG ANSWERS, measured against the built world at the full profile — the
+# figures and how each was derived are recorded in worlds/copperline/PLANTED.md
+# — and what convicts each. Counts are store-days, against the 14,317 the till
+# data holds:
+#
+#   the day taken from `event_time_utc`             7,473 store-days missing,
+#                                                   283 invented, 4,126 wrong.
+#                                                   Coverage, invented-rows and
+#                                                   full-comparison tests
+#   the day rebuilt from the local stamp and the    186 missing, 307 invented,
+#     store's zone                                  8,639 wrong. Close-batch
+#                                                   test names its own half
+#   the same, reached by switching on the era       identical to the line above
+#     (`coalesce(utc, converted local)`)            — after the cutover the two
+#                                                   are the same value
+#   `raw.stores` joined without picking a version   1,161 store-days doubled,
+#                                                   silently. SCD2 test
+#   voids dropped from the row entirely             3 store-days missing, 2,101
+#                                                   wrong. Void test
+#   the pack built off `raw.pos_batch_manifest`     74 store-days invented that
+#     rather than off the transactions              no register reported.
+#                                                   Invented-rows test
+#   the store-days whose manifest count disagrees   36 store-days missing.
+#     with what loaded dropped as dirty             Coverage test. POS-2 says a
+#                                                   partial file is reloaded,
+#                                                   not repaired
+#   the run's own date used as `ds`                 coverage and invented-rows
+#   a fanned-out join                               one-row-per-store-day test
+#   the job named something else, or the tree       dag_parses
+#     broken
+#   nothing delivered, or a note and no job         dag_runs
+#
+# NOT CONVICTED, and deliberately:
+#   * `event_time_local::date` as the day. It equals `business_date` on every
+#     row in the feed, before the cutover and after it, so a job that reads the
+#     local stamp's date rather than the store's own column lands the same
+#     answer. It is a defensible reading and it passes.
+#   * a NULL rather than a zero in `net_cents` on a store-day whose every
+#     transaction was voided. Both say the till took nothing.
+#   * a backfill that fills MORE than the window. The verifier reads the table
+#     whole and compares only the days the ticket named. Filling the rest of
+#     the history is more work than was asked and is a defensible reading of
+#     "one table everybody reads".
+#
+# COST. One graded run. The job is a one-off over a fixed window, so it needs
+# no configuration and no upstream, and nothing else is replayed.
+replay: []
+
+checks:
+
+# The job exists under the name the ticket gives it, and the tree still imports.
+- kind: dag_parses
+  dag_id: store_trading_day_backfill
+
+# It runs. The ticket asks for a one-off that needs no configuration, so a
+# plain trigger has to do the whole window — a job that only works when
+# somebody types two dates into it is a job store ops cannot ask for.
+- kind: dag_runs
+  dag_id: store_trading_day_backfill
+
+# The substance. See verifier/test_outputs.py: the population, the grain, the
+# day on the row, the market, the counts and the money. Every expected result
+# is computed from `raw.pos_sales_header` and `raw.stores` in the same session.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

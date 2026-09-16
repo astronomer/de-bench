@@ -1,0 +1,15 @@
+# Run output. The warehouse, the landing tree, published partitions and
+# exports are produced by the runs; only code and fixtures are committed.
+include/data/
+landing/
+exports/
+_notifications/
+logs/
+
+# Tooling junk.
+__pycache__/
+*.pyc
+.astro/
+target/
+dbt_packages/
+.user.yml

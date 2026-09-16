@@ -1,0 +1,119 @@
+# The escalation is wrong in three places at once, and each one only becomes
+# visible when the one before it is fixed. That is the task.
+#
+#   1. `CREATE SCHEMA IF NOT EXISTS ops` is unqualified, and `warehouse.connect`
+#      puts the read-only frozen copy first on the search path, so the step
+#      raises on its first statement. This is the same shape PLANTED.md records
+#      for the restore path, one DAG over.
+#   2. `pos_silent_stores.sql` holds three `?` and the call site binds two, so
+#      even with the schema fixed the step dies on the prepared statement.
+#   3. The statement counts a delivered batch by `status = 'loaded'`, and the
+#      manifest's own words are `ok`, `late` and `missing`. Nothing matches, so
+#      every store's last delivery reads as NULL and every store is escalated.
+#      `pos_manifest_build.sql`, `pos_manifest_build_store.sql` and
+#      `pos_loaded_stores.sql` all say `loaded` too — the writers and this one
+#      reader agree with each other and with nothing in the table.
+#   4. And under that: `max(business_date)` is taken over the whole manifest
+#      with no upper bound, so a run for an old date answers with the batches
+#      that have arrived since. This one is invisible until 3 is fixed, and it
+#      is the defect the ticket's "how long has it been off the air" turns on.
+#
+# NOTHING HERE IS AUTHORED. Every expected result on a real night is computed
+# from `raw.pos_batch_manifest` in the same session, and even which status words
+# count as a delivered batch is read off the landed table — the row kept for a
+# batch that never came carries no row count. The verifier's own first test
+# fails loudly if the landed vocabulary ever stops being three words.
+#
+# WHY NOTHING RUNS THE DAG. `replay` is empty on purpose. The catch-up's first
+# two steps reload every store-day whose file is still on disk and rewrite its
+# manifest row — the table every expected result here is computed from. The
+# verifier calls the same callable the `escalate_silent_stores` task calls, with
+# the same statement and the same parameters, and leaves the manifest alone.
+#
+# THE FOUR NIGHTS, none of them named in the ticket, all outside the reserved
+# windows and the never-grade tail:
+#
+#   2026-01-15  ordinary. Nobody's feed has stopped, so nobody is escalated.
+#   2026-02-19  a store whose batches stopped a fortnight before and start
+#               again in March.
+#   2026-04-06  a market holiday. The one store whose feed has stopped is in
+#               that market.
+#   2026-05-07  eleven weeks later, and a different store.
+#
+# AND AN ESTATE THE WORLD DOES NOT HOLD. Eight invented stores in two invented
+# markets, in a warehouse the verifier builds from the landed tables' own column
+# lists. Everything the ticket states is graded there a second time, against
+# stores no fixture mentions.
+#
+# THE WRONG ANSWERS, and what convicts each. Every line was run.
+#
+#   nothing changed                            8 of 11 tests; the step raises
+#   only the schema qualified                  same, one statement later
+#   schema and parameters fixed, `loaded` kept 6 tests: all 268 stores every
+#                                              night, and the intake still
+#                                              stamping a word of its own
+#   the filter read the other way round        5 tests: the delivered stores
+#     (`status = 'missing'`)                   come back and the silent ones do
+#                                              not
+#   the reader fixed, the writers left alone   2 tests: the intake stamps a word
+#                                              the manifest does not hold, and
+#                                              the catch-up stops recognising
+#                                              the store-day it just loaded
+#   the right words, no bound on the business  2 tests: the February night, and
+#     date                                     the estate's store whose feed
+#                                              comes back after the night under
+#                                              test
+#   the two silent stores named in the SQL     the estate: its silent stores
+#                                              have other names
+#   every store in the dimension, opened or    5 tests: the sites that have not
+#     not                                      opened yet come back as silent
+#   the store dimension filtered to open       the estate: the store the
+#     sites                                    dimension calls closed is exactly
+#                                              the one store systems have to
+#                                              confirm, and the ticket says so
+#   the escalation deleted, or the step        dag_structure, then dag_parses
+#     dropped from the DAG
+#
+# WHAT IS DELIBERATELY NOT GRADED. Two readings are defensible and the ticket
+# settles neither, so no check turns on them:
+#
+#   * whether the intake stamps `ok` and the catch-up `late`, or both write the
+#     same word. The tests ask only that the word is one the manifest already
+#     holds and that both halves agree on it.
+#   * the boundary itself — whether a store whose last batch is exactly
+#     LOOKBACK_DAYS back is silent. "Sent nothing for three business days" reads
+#     both ways, so every graded gap is far from the edge.
+#   * counting the lookback in business days rather than calendar days. It flags
+#     no more stores than the calendar reading does, and every graded gap is
+#     weeks wide, so both readings give the same answer on all four nights.
+replay: []
+
+checks:
+
+# The tree still imports and the catch-up is still a DAG.
+- kind: dag_parses
+  dag_id: store_pos_late_catchup
+
+# The hourly intake shares the manifest build, so a fix that breaks it takes
+# the store sales marts, the comp figures and the till reconciliation with it.
+- kind: dag_parses
+  dag_id: store_pos_intake
+
+# The house shape holds: count what is waiting, load it, escalate what never
+# came. Dropping the escalation is the other way to make the alert stop.
+- kind: dag_structure
+  dag_id: store_pos_late_catchup
+  task_ids:
+  - report_late_stores
+  - load_late_stores
+  - escalate_silent_stores
+  operators:
+    report_late_stores: PythonOperator
+    load_late_stores: PythonOperator
+    escalate_silent_stores: PythonOperator
+
+# The substance. See verifier/test_outputs.py — four nights out of the world's
+# own manifest, and an estate the world does not hold.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600

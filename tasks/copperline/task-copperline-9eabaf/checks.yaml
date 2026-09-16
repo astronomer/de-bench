@@ -1,0 +1,87 @@
+# The deliverable is a written answer, so every check reads RESPONSE.md. The
+# six of them grade six separate decisions: the count, the split that adds to
+# it, the size of the overlap, where the pairing came from, what the two
+# numbers in circulation are, and what the CRM's own rule subtracted. Getting
+# the headline right by luck passes one of the six.
+#
+# Patterns are matched case-insensitively with re.search, so they are written
+# loose on purpose: a number may carry a comma or not, and a label may be bold,
+# bracketed or punctuated any way the writer likes. What each pattern pins is a
+# figure or a named authority, never a phrasing.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# The answer. 3,960 active accounts on Copperline's book plus 1,380 on the
+# acquired book, less the 300 pairs that are the same business twice, is 5,040.
+# The number has to sit against the claim it answers, not merely appear
+# somewhere in the file, so a reply that lands on 5,092 and mentions 5,040 in
+# passing fails.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'active[^0-9\n]{0,40}accounts?[^0-9\n]{0,40}5[,\s]?040'
+
+# The split. It has to add to the count, which is the arithmetic the headline
+# hides: 3,960 accounts on Copperline's book, and 1,080 on the acquired book
+# once the 300 merged ones are on the Copperline side. An agent that counted
+# the acquired book's 20 inactive accounts, or that dropped the acquired book
+# altogether, cannot produce both figures.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b3[,\s]?960\b'
+  - '\b1[,\s]?080\b'
+
+# The overlap. 300 is the whole difference between a defensible number and the
+# board pack's, so a method that never states it is not a method.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(\b300\b[^0-9\n]{0,60}(pair|merge|match|duplicat|overlap|both books)|(pair|merge|match|duplicat|overlap|both books)[^0-9\n]{0,60}\b300\b)'
+
+# Where the pairing came from. The reviewed decisions are the source of record
+# and a re-derived match is not, so the reply has to name the review rather than
+# a matching rule of its own.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(merge[_ ]?candidates|merge decision|decided (merge|pair)|decision[^\n]{0,40}(merge|pair)|review(ed)?[^\n]{0,40}(merge|pair|match)|(merge|pair)[^\n]{0,40}(review|decision|decided|by hand|integration team))'
+
+# Both numbers in circulation are accounted for, and the board pack's is
+# explained as the two books added with nothing merged. The ticket asks for
+# this in as many words; a reply that gives a number and says nothing about the
+# two that finance and the customer team already hold has not settled anything.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b5[,\s]?340\b'
+  - '\b5[,\s]?092\b'
+  - '(twice|double[- ]?count|both books|two books|no merge|without[^\n]{0,30}merge|un-?merged|not merged|never merged|neither)'
+
+# What the CRM subtracted. 5,092 is the two books less the 248 pairs a matcher
+# collapsed on shared e-mail domain — 205 real merges and 43 separate
+# businesses on a shared provider. The ticket asks what the number is
+# counting, and the answer is the rule and the count it removes together; a
+# reply that calls 5,092 a mystery, or guesses at the rule without the 248
+# that pins it to the data, has not answered. The first run proved this check
+# is needed: an agent passed the other five while writing "the CRM's 5,092 is
+# unclear". The final run proved the first version of this check too loose:
+# an agent passed it with 248 as bare arithmetic (5,340 - 5,092) plus the
+# word "domain" from an unrelated sentence, while calling the rule "an
+# inference, not a documented method". The 248 must now sit within a
+# 160-character window of the domain rule, and the reply must carry one half
+# of the 205/43 split that only a query yields. A wrapped line between the
+# figure and the rule still matches; the window crosses newlines on purpose.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The window is tempered at sentence boundaries and the split is bound to
+  # its noun: a guesser names its own guess, so "248 dropped, most likely a
+  # matcher on the shared e-mail domain — it is an inference" satisfied the
+  # untempered window, and the bare (\b43\b|\b205\b) matched 43%, 1,205 and
+  # any list position. The figure has to arrive with the thing it counts.
+  - '(\b248\b(?:(?!\.\s)[\s\S]){0,120}(e-?mail\s+)?domain|(e-?mail\s+)?domain(?:(?!\.\s)[\s\S]){0,120}\b248\b)'
+  - '((\b205\b|\b43\b)\s*(of (the )?[0-9,]+ )?(real |true |genuine |separate |different )*(pairs?|merges?|businesses|companies|firms|accounts that are not|of the 300)|(pairs?|merges?|businesses|companies)[^\n]{0,25}(\b205\b|\b43\b))'

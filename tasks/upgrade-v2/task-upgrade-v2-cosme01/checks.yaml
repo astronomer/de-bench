@@ -1,0 +1,15 @@
+checks:
+- kind: scoring_primitive
+  name: airflow_pin_target_aligned
+- kind: scoring_primitive
+  name: cosmos_imports_post_1_0
+- kind: scoring_primitive
+  name: dbtdag_uses_projectconfig
+- kind: scoring_primitive
+  name: dbtdag_uses_profileconfig
+- kind: scoring_primitive
+  name: dbtdag_no_pre_1_0_kwargs
+- kind: scoring_primitive
+  name: dbt_local_operators_use_profileconfig
+- kind: scoring_primitive
+  name: cosmos_pin_uplifted

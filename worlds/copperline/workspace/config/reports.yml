@@ -1,0 +1,53 @@
+# The rendered finance reports. `fin_report_publish` builds one set of tasks
+# per entry, and `plat_report_registry_sync` writes ops/report_registry.yml
+# from this file.
+#
+# This is not `docs/report-registry.md`. That document lists every published
+# output in the company and is the one with the owners and the refresh
+# commitments. This file lists the four reports the finance publisher renders,
+# and the registry document has an open item about folding the two together.
+#
+# `reads` is a table name as a string, which is why none of these reports
+# appears in the dbt graph. `docs/lineage.md` carries them under the marts they
+# read.
+
+reports:
+  monthly_revenue_by_entity:
+    title: Recognised revenue by entity and fiscal month
+    reads: marts.revenue_recognized_monthly
+    grain: [fiscal_month, entity]
+    columns: [fiscal_month, entity, recognized_cents, is_closed]
+    order_by: [fiscal_month, entity]
+    format: csv
+    lands_at: exports/reports/monthly_revenue_by_entity
+    owner: finance
+
+  account_rollup_monthly:
+    title: Trade accounts by reported revenue
+    reads: marts.account_rollup
+    grain: [fiscal_month, entity, customer_id]
+    columns: [fiscal_month, entity, customer_id, reported_cents]
+    order_by: [fiscal_month, reported_cents]
+    format: csv
+    lands_at: exports/reports/account_rollup_monthly
+    owner: finance
+
+  comp_sales_weekly:
+    title: Comparable store sales by region
+    reads: marts.comp_sales_daily
+    grain: [ds, region]
+    columns: [ds, region, comp_sales_cents, comp_sales_cents_ly, comp_store_count]
+    order_by: [ds, region]
+    format: csv
+    lands_at: exports/reports/comp_sales_weekly
+    owner: finance
+
+  revenue_daily_summary:
+    title: Booked revenue by day and channel
+    reads: marts.daily_revenue
+    grain: [ds, channel]
+    columns: [ds, channel, booked_cents, order_count]
+    order_by: [ds, channel]
+    format: csv
+    lands_at: exports/reports/revenue_daily_summary
+    owner: finance

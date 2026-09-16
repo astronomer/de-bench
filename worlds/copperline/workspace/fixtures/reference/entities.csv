@@ -1,0 +1,6 @@
+entity_code,entity_name,functional_currency,country_code,first_traded_on
+CL-US,"Copperline Retail Group, Inc.",USD,US,2009-03-14
+CL-GB,Copperline Retail UK Ltd,GBP,GB,2025-04-07
+CL-IE,Copperline Retail Ireland DAC,EUR,IE,2025-04-07
+CL-DE,Copperline Retail Deutschland GmbH,EUR,DE,2025-04-07
+CL-MX,Copperline Retail Mexico S. de R.L.,MXN,MX,2026-02-01

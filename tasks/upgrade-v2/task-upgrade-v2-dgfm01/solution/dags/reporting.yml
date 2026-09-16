@@ -1,0 +1,19 @@
+daily_report:
+  schedule:
+    __and__:
+      - "s3://reports/orders.parquet"
+      - "s3://reports/inventory.parquet"
+  tasks:
+    build_report:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo build_report
+
+weekly_summary:
+  schedule:
+    __or__:
+      - "s3://reports/weekly.parquet"
+      - "s3://reports/quarterly.parquet"
+  tasks:
+    summarize:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo summarize

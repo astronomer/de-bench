@@ -1,0 +1,7 @@
+checks:
+- kind: scoring_primitive
+  name: dbt_local_operators_use_profileconfig
+- kind: scoring_primitive
+  name: cosmos_imports_post_1_0
+- kind: scoring_primitive
+  name: cosmos_pin_uplifted

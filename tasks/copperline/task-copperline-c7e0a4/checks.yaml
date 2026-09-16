@@ -1,0 +1,170 @@
+# The deliverable is three reconciled files and a record of the decisions, so
+# the checks come in two halves: a vendored pytest that reads the files through
+# the world's own readers, and six patterns over RESPONSE.md, one per decision
+# the write-up has to carry.
+#
+# THE DIRECTION IS THE WHOLE TASK. `contracts/alert_subjects.yml:7` says
+# `source_of_truth: config/alerts.yml` and `contracts/alerting.md:22-23` §AL-3
+# says an alert exists because it is in the config, which holds the table, the
+# check, the threshold and the owner. So the config defines membership, owner
+# and check; the schema's list is a copy that fell behind, and the schema is the
+# side that moves. Exactly one rule runs the other way — §AL-1 at
+# `contracts/alerting.md:9` requires the owner to be a team that exists — and
+# three config subjects break it. An agent that reads the enforcement sentence
+# without reading line 7 concludes the config is the offender and deletes ten
+# live alerts.
+#
+# No authored figure. Every relation the verifier grades is computed from the
+# config as the agent left it. Three lists are authored and each is a shipped
+# fact rather than a judgment: the thirteen (table, check) pairs the world
+# ships, the ten owners it already had right, and the three the reorganisation
+# orphaned. The derivation of each sits beside it in verifier/test_outputs.py.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   the ten subjects the schema never named       nothing-stopped-being-watched:
+#     deleted from the config so the two lists    the thirteen shipped pairs have
+#     agree                                       to survive
+#   the schema tidied and the config left as it   the schema-names-every-table
+#     is                                          test
+#   the schema's `subjects:` list deleted,        the schema fixture: the ticket
+#     "the config is the source of truth"         says the list stays a list
+#   the schema's header rewritten so it no        the schema fixture: `consumer`
+#     longer claims the list check                and `source_of_truth` have to
+#                                                 survive the amendment
+#   the retired owners left alone                 the AL-1 test, through
+#                                                 `alerts.unowned`
+#   the retired owners sent to a live team that   the orphaned-owners test:
+#     does not run the feed — customer for the    growth builds and runs all
+#     e-mail feed, platform for all three         three
+#   `lifecycle` copied into the schema instead    the AL-1 test and the
+#     of fixed in the config                      who-is-paged test
+#   `marts.gmv_daily` settled by moving the       the owners-did-not-move test:
+#     config's page from commerce to finance      the config defines who is paged
+#   `marts.comp_sales_daily` settled by making    nothing-stopped-being-watched,
+#     the config freshness to match the schema    on the (table, check) pair
+#   `docs/lineage.md` never found                 the third-copy test
+#   a note written and no file changed            every verifier test
+#   the files changed and nothing written down    the six RESPONSE patterns
+#   the list check written into                   the do_not_modify gate on
+#     `gro_alerting_daily`                        `projects/**`, which the ticket
+#                                                 states in as many words
+#
+# WHAT IS DELIBERATELY NOT CONVICTED.
+#
+#   The five tables the schema names and nothing watches — `raw.orders`,
+#   `raw.pay_meridian_settlements`, `raw.inventory_snapshots`,
+#   `raw.carrier_invoices`, `marts.daily_revenue`. Taking them off makes the
+#   list the watch list; keeping them and raising the coverage gap is the other
+#   reading, and since the schema's stated enforcement runs one way only, a
+#   superset still passes it. Both readings pass. The reply has to name all five
+#   either way, which is the fifth pattern.
+#
+#   The word for a null-rate check. The schema's vocabulary is `volume` and
+#   `freshness` and two config subjects are `null_rate`, so whatever an answer
+#   invents for those two passes; there is nothing in the tree to derive it
+#   from. `kind: row_count` in place of `volume` passes too — both say a count.
+#
+#   Extra coverage. An answer that also adds a subject nobody asked for passes:
+#   it is more than the ticket asks and it breaks nothing. That is also what
+#   keeps this ticket and GRO-241 from contradicting each other — GRO-241 adds a
+#   `row_count` subject on `raw.web_events`, and `raw.web_events` is excluded
+#   from every comparison here.
+#
+#   `docs/report-registry.md`. Its C-10 row already says "tables named as
+#   strings in `config/alerts.yml`", which stays true whatever the list holds.
+#   There is nothing to correct and no credit for touching it.
+#
+# No DAG check. `projects/**` is protected, so the code trees are identical on
+# both arms and a parse check would grade the same files twice. The config and
+# the schema are read at run time, never at parse, so a broken edit to either
+# would not show up in a DagBag load anyway — the verifier loads both through
+# the readers the two DAGs use, and says which file failed.
+#
+# Nothing runs. All three files are committed and the verifier reads them.
+replay: []
+
+checks:
+
+# The file facts: nothing stopped being watched, every watched table has a live
+# team behind it, the three orphans went to the team that runs the feed, the ten
+# owners the config already had did not move, the schema names what the config
+# watches, the two agree about the owner and the check per table, and the third
+# copy of the list in `docs/lineage.md` reaches every mart the config watches.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 300
+
+# The direction, and the line it comes from. A write-up that says which file it
+# changed without saying why that file was the wrong one has recorded a keystroke
+# rather than a decision. Only the two governing citations count: the schema's
+# own `source_of_truth` key, or the §AL-3 clause that says the same thing in
+# prose. §CON-1 does not count: the ticket prints that citation itself, and a
+# second audit found the agent it had been added for never read the rule — it
+# graded each table on its own evidence and repaired four of the five uncovered
+# subjects in the opposite direction from the file the rule crowns.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'config/alerts\.yml'
+  - '(source[_ ]of[_ ]truth|AL-3)'
+
+# The three orphaned subjects, and where the successor came from. Naming growth
+# is half of it; the other half is the evidence, because growth is also the
+# guess an agent makes from the `gro_` prefix without opening anything.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'raw\.email_events'
+  - 'marts\.audience_segments'
+  - 'raw\.seo_rankings'
+  - '\bgrowth\b'
+  - '(gro_email_engagement_daily|gro_seo_rank_intake|models/growth|report-registry)'
+
+# `marts.gmv_daily`, the one row where the two files name different teams for
+# the same page. The verifier grades the end state; this grades that the
+# disagreement was noticed and settled rather than overwritten in passing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'marts\.gmv_daily'
+  - '(gmv_daily.{0,200}commerce|commerce.{0,200}gmv_daily)'
+
+# The question the ticket opens with, and the hardest thing here to find. The
+# schema's header claims an enforcement that has never existed:
+# `include/lib/contracts.py:181-182` returns "the contract names no model" and
+# `projects/platform/dags/plat_contracts_enforce.py:112-121` drops that result
+# before the failure count, naming `alert_subjects` as one of two it skips and
+# saying the list check belongs to the DAG that owns the document. For C-10 that
+# DAG is `gro_alerting_daily`, which only reports the subjects nobody owns. An
+# answer that says "nothing enforces it" without finding where it was supposed
+# to live has read one of the two files.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'plat_contracts_enforce'
+  - 'gro_alerting_daily'
+  - '(nothing|never|no code|no.{0,3}one|does not|is not|skip)'
+
+# The five tables the schema names that nothing watches. They are not the ten
+# that went the other way and an answer that conflated the two directions cannot
+# list them. What happens to them in the file is not graded — see above — but a
+# reconciliation that leaves them unmentioned has dropped five promises in
+# silence.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'raw\.orders'
+  - 'raw\.pay_meridian_settlements'
+  - 'raw\.inventory_snapshots'
+  - 'raw\.carrier_invoices'
+  - 'marts\.daily_revenue'
+
+# The third copy of the list. The ticket says it exists and does not say where;
+# `docs/lineage.md` is one grep for `config/alerts.yml` away, and REG-2 at
+# `docs/report-registry.md:13` says its read set is the complete one.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'docs/lineage\.md'
+  - '(C-10|data health)'

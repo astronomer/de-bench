@@ -1,0 +1,185 @@
+# The deliverable is a written answer, so every check reads RESPONSE.md. The
+# six of them grade six separate decisions: the size of the mis-filed
+# population, the mechanism and the direction it can run in, and four pairs of
+# period figures that each convict a different misreading of the conversion
+# rule. Getting one figure right by luck passes one of the six.
+#
+# Patterns are matched case-insensitively with re.search, so they are written
+# loose on purpose: a figure may carry a comma or not, a sign or not, and a
+# label may be bold, bracketed or punctuated any way the writer likes. What
+# each pattern pins is a figure or a named column, never a phrasing.
+#
+# WHAT THE TICKET IS
+# ------------------
+# `stg_finance__credit_memos` selects `applies_to_period as fiscal_month`, and
+# `applies_to_period` is the fiscal period of the INVOICE date — the extract
+# stamps it from `_util.fiscal_month` keyed on `raw.invoices.invoice_date`.
+# §REV-5 books a credit memo "on its issue date... against the same entity and
+# the same fiscal period the issue date falls in". `account_rollup.sql` groups
+# its credits CTE by the renamed column, so the board's account page has always
+# filed credits by the invoice's period. `int_gl_postings_unified.sql`, reading
+# the same staging model, posts them on `m.issued_date` at the invoice's
+# `fx_rate_ppm` — §REV-5 both ways. The two readers of one model disagree, and
+# that disagreement is the ticket's opening symptom.
+#
+# `raw.credit_memos.issued_on` is `invoice_date + 2..23 days` for most rows and
+# `invoice_date + 45..84 days` for the late-issued subset, so a memo is NEVER
+# issued before its invoice: 0 of 11,528 rows. The page can therefore only file
+# a credit into a period at or before the one it belongs to, never after.
+#
+# WHERE THE FIGURES COME FROM
+# ---------------------------
+# Three independent computations over the full-profile warehouse, agreeing to
+# the cent on all six graded periods:
+#
+#   1. `tools/copperline_oracle/recognition.py` — its `_credit_memos` and
+#      `Books.book`, which is exact-Decimal ROUND_HALF_UP and applies §REV-8's
+#      redirection. It reports 164,079,564 / 214,883,881 / 164,712,682 /
+#      171,665,087 / 236,213,375 / 179,791,854 for FY2025 P1..P6.
+#   2. integer half-up in Python — `(cents * ppm + 500000) // 1000000` — over
+#      `raw.credit_memos` joined to `raw.invoices` and `raw.fx_rates`, which is
+#      the same arithmetic `tools/copperline_ledger_workings/close.py` uses in
+#      its `usd()` macro.
+#   3. DuckDB `round(amount_cents * ppm / 1000000.0)`.
+#
+# The "page files" column is `sum` of the same converted amounts grouped by
+# `raw.credit_memos.applies_to_period`. Over the whole book the two readings
+# total the SAME 5,331,080,655 cents, which is the sanity the derivation rests
+# on: nothing is created or lost, it is only in the wrong period.
+#
+# §REV-8 CHANGES NOTHING HERE, measured. `raw.credit_memos.loaded_at` is the
+# issue date plus 0 to 5 days, and a period closes on the 5th business day of
+# the following one, so no memo in the book arrives after its own period has
+# closed: the oracle reports `redirected == 0`. A reply that applies §REV-8
+# lands on the same six figures, which is why the ticket does not mention it.
+#
+# THE PERIODS. FY2025 P1..P6, none of which is graded by another ticket:
+# FIN-402 (`task-copperline-e6b3af`) grades FY2026-P02, FY2025-P10 and
+# FY2025-P11; FIN-311 (`task-copperline-c03aad`) grades FY2026-P04. None of the
+# six touches the world's reserved windows (2026-06-01..09, and FY2025 P8,
+# 2025-08-31..2025-10-04). P1 and P2 hold USD memos only — Great Britain,
+# Ireland and Germany opened on 2025-04-07, inside P3 — so those two periods
+# grade the period logic on its own and P3..P6 grade the conversion rule on top
+# of it.
+#
+# THE LAST DIGITS ARE LOOSE, on four figures, for exactly one reason: §REV-7
+# fixes the conversion at one per amount but names no rounding mode, and
+# truncating instead of rounding half up moves the four converted periods by 1
+# to 3 cents (P3 -15,183,466 against -15,183,487; P4 -11,094,335; P5
+# +17,072,085; P6 -6,056,734). The ticket says half up and says "we are not
+# chasing cents", and every misreading below moves 80,000 cents at the least,
+# so the loose digits sit far above the rounding and far below the signal.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing written                            every check
+#   the seam never found, so the page's        the four figure checks: every
+#     column is taken as the answer              movement comes out at nought
+#   the credits converted at the memo's own    the P3/P4 and P5/P6 checks:
+#     issue-date rate rather than its            -15,103,266, -11,252,661,
+#     invoice's (§REV-5's second paragraph)      +16,990,574, -6,095,232
+#   nothing converted to USD at all            the P3/P4 and P5/P6 checks:
+#                                                -11,830,826, -10,478,201,
+#                                                +16,453,971, -6,987,658. P1
+#                                                and P2 are USD-only and do not
+#                                                move, which is why they are
+#                                                graded separately
+#   the page's side taken from the INVOICE's   the P1/P2 check: +4,544,327 and
+#     `posted_period` rather than the memo's     +1,967,515, and every other
+#     own column (7,519 invoices carry a         period moves too
+#     posted period that is not their
+#     invoice date's)
+#   calendar months instead of the 4-5-4       every figure check: calendar
+#     fiscal calendar                            June 2025 is not FY2025 P5,
+#                                                and no period label or figure
+#                                                survives
+#   the population counted over the invoices   the population check: 11,528
+#     rather than the memos, or the share        memos, 4,866 of them filed to
+#     quoted without the counts                  a period other than their
+#                                                issue period
+#   the movement quoted for the year rather    the four figure checks
+#     than per period
+#   a table and no reading of it               the mechanism check
+#
+# WHAT IS NOT CONVICTED, on purpose:
+#
+#   * The rounding mode. See above — the loose digits cover truncation.
+#   * §REV-8's redirection. It moves nothing on this book, measured.
+#   * The sign convention. The ticket fixes it, and a reply that prints
+#     magnitudes with the direction in words matches the same patterns.
+#   * Extra rows or columns: a half-year total, the memo counts per period, an
+#     entity split beside the company figure. All reasonable things to carry.
+#   * Whether the reply also proposes the fix. The ticket says nothing moves
+#     this week, and nothing here looks for a patch.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# THE POPULATION. 4,866 of the 11,528 memos in `raw.credit_memos` carry an
+# `applies_to_period` that is not the fiscal period their `issued_on` falls in
+# — 42.2%, the large minority the ticket is worth writing for. The two counts
+# have to sit together, because "4,866 memos" without the book size is not a
+# size and the book size alone is not an answer.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(4[,\s]?866[^0-9\n]{0,40}11[,\s]?528|11[,\s]?528[^0-9\n]{0,40}4[,\s]?866)'
+
+# THE MECHANISM AND THE DIRECTION. The reply has to name the column the page
+# files by and the date the policy files by, and say that a memo can only land
+# early. A reply that gives six figures and never says what is wrong has not
+# written a restatement paper.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The column, or the model that offers it under the other name.
+  - '(applies_to_period|applies[ -]to[ -]period|stg_finance__credit_memos)'
+  # The date §REV-5 books on.
+  - '(issued_on|issue date|issue-date|issued on|date it was issued)'
+  # The direction, in whatever words. "never later", "always earlier", "can
+  # only be early", "not after" all match.
+  - '((never|cannot|can only|only ever|always|not)[^\n]{0,80}(earlier|early|later|before|after)|(earlier|early|later|too soon)[^\n]{0,80}(never|cannot|only|always))'
+
+# PERIODS 1 AND 2, the two that hold no foreign currency. FY2025-P01 runs
+# 2025-02-02 to 2025-03-01 and moves +6,092,825 cents; FY2025-P02 runs
+# 2025-03-02 to 2025-04-05 and moves +3,796,446. Both are exact under every
+# rounding mode, because every memo issued in them is USD. They grade the
+# period arithmetic with the conversion rule taken out of it, so a reply that
+# read §REV-5's first paragraph and skipped its second still passes here — and
+# fails the next two checks.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b6[,\s]?092[,\s]?825\b'
+  - '\b3[,\s]?796[,\s]?446\b'
+
+# PERIODS 3 AND 4, the first two that carry euro and sterling memos. P3 moves
+# -15,183,487 and P4 -11,094,333: the page files 15,183,487 cents of credit
+# into P3 that belongs later, and 11,094,333 into P4. These are the two that
+# separate the three conversion readings — see the battery above.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b15[,\s]?183[,\s]?4\d\d\b'
+  - '\b11[,\s]?094[,\s]?33\d\b'
+
+# PERIODS 5 AND 6. P5 moves +17,072,084 and P6 -6,056,731. P5 is the largest
+# move of the six and P6 turns back the other way, so the pair is also the
+# proof that the answer is not one direction repeated.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b17[,\s]?072[,\s]?08\d\b'
+  - '\b6[,\s]?056[,\s]?73\d\b'
+
+# THE PERIOD THAT MOVES FURTHEST, named against its own figure. FY2025-P05,
+# 2025-06-01 to 2025-07-05, +17,072,084 cents — the account page carries that
+# much too little credit in it. The ticket asks for the period by name, so the
+# figure has to sit against the label rather than merely appear in a table: a
+# reply that names P3 and mentions 17,072,084 in a row somewhere fails.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(FY[\s-]?2025[\s-]?P\s?0?5\b[\s\S]{0,220}17[,\s]?072[,\s]?08\d|17[,\s]?072[,\s]?08\d[\s\S]{0,220}FY[\s-]?2025[\s-]?P\s?0?5\b)'

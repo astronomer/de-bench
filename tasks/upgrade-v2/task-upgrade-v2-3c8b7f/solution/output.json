@@ -1,0 +1,6 @@
+{
+  "removed_kwargs": {
+    "KubernetesPodOperator": ["is_delete_operator_pod"]
+  },
+  "notes": "is_delete_operator_pod was removed from KubernetesPodOperator in apache-airflow-providers-cncf-kubernetes 10.x; pods are now always cleaned up via the on_finish_action enum."
+}

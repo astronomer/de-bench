@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <info>
+    <name>load_carrier_scans</name>
+    <description>package level scans. added when the parcel contract moved to zone rating.</description>
+    <extended_description>NOTE - the scan feed is package grain, the shipment header is
+shipment grain, do not join and then sum billed_cents or you count the header twice per
+package. this bit us in Jan 2020.</extended_description>
+    <trans_version>3.3</trans_version>
+    <trans_type>Normal</trans_type>
+    <directory>/copperline/nightly/trn</directory>
+    <parameters/>
+    <feedback_shown>Y</feedback_shown>
+    <feedback_size>50000</feedback_size>
+    <using_thread_priorities>Y</using_thread_priorities>
+    <created_user>amireles</created_user>
+    <created_date>2020/01/22 21:08:39.941</created_date>
+    <modified_user>amireles</modified_user>
+    <modified_date>2021/06/02 16:44:11.720</modified_date>
+  </info>
+  <connection>
+    <name>copperline_wh</name>
+    <server>${CPL_WH_HOST}</server>
+    <type>GENERIC</type>
+    <access>Native</access>
+    <database>${CPL_WH_DB}</database>
+    <port>0</port>
+    <username>${CPL_WH_USER}</username>
+    <password>Encrypted 2be98afc86aa7f2e4cb14a9d61c2f8b1c</password>
+  </connection>
+  <order>
+    <hop><from>read raw.shipment_packages</from><to>shipment header</to><enabled>Y</enabled></hop>
+    <hop><from>shipment header</from><to>derive scan fields</to><enabled>Y</enabled></hop>
+    <hop><from>derive scan fields</from><to>stamp the load</to><enabled>Y</enabled></hop>
+    <hop><from>stamp the load</from><to>write staging</to><enabled>Y</enabled></hop>
+    <hop><from>derive scan fields</from><to>old accessorial split</to><enabled>N</enabled></hop>
+  </order>
+  <step>
+    <name>read raw.shipment_packages</name>
+    <type>TableInput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <connection>copperline_wh</connection>
+    <sql>SELECT package_id
+     , shipment_id
+     , carrier_code
+     , service_level
+     , lane_id
+     , origin_dc
+     , dest_zip3
+     , dest_country
+     , ship_date
+     , ship_time_utc
+     , delivered_at
+     , billed_weight_g
+     , zone
+     , billed_cents
+     , accessorial_cents
+     , loaded_at
+  FROM raw.shipment_packages
+ WHERE ship_date &lt;= DATE '${BUSINESS_DATE}'
+   AND ${LOAD_FROM_COLUMN} &gt; TIMESTAMP '${LOAD_FROM}'</sql>
+    <limit>0</limit>
+    <lookup/>
+    <execute_each_row>N</execute_each_row>
+    <variables_active>Y</variables_active>
+    <lazy_conversion_active>N</lazy_conversion_active>
+    <cluster_schema/>
+    <GUI><xloc>112</xloc><yloc>112</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>shipment header</name>
+    <type>DBLookup</type>
+    <description>header attributes only. NEVER take money off the header here.</description>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <connection>copperline_wh</connection>
+    <schema>raw</schema>
+    <table>shipments</table>
+    <cache>Y</cache>
+    <cache_load_all>N</cache_load_all>
+    <cache_size>5000</cache_size>
+    <lookup>
+      <key>
+        <name>shipment_id</name>
+        <field>shipment_id</field>
+        <condition>=</condition>
+        <name2/>
+      </key>
+      <value>
+        <name>shipment_status</name>
+        <rename>shipment_status</rename>
+        <default/>
+        <type>String</type>
+      </value>
+      <value>
+        <name>package_count</name>
+        <rename>shipment_package_count</rename>
+        <default>1</default>
+        <type>Integer</type>
+      </value>
+      <value>
+        <name>brand</name>
+        <rename>brand</rename>
+        <default/>
+        <type>String</type>
+      </value>
+    </lookup>
+    <orderby/>
+    <fail_on_multiple>N</fail_on_multiple>
+    <eat_row_on_failure>N</eat_row_on_failure>
+    <cluster_schema/>
+    <GUI><xloc>288</xloc><yloc>112</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>derive scan fields</name>
+    <type>ScriptValueMod</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <compatible>N</compatible>
+    <optimizationLevel>9</optimizationLevel>
+    <jsScripts>
+      <jsScript>
+        <jsScript_type>0</jsScript_type>
+        <jsScript_name>Script 1</jsScript_name>
+        <jsScript_script>// billable weight is the greater of actual and dimensional.
+// dim divisor lives in the carrier contract, 139 for the parcel carriers,
+// 166 for the two regionals. we do not have the divisor in this feed so the
+// rating team recomputes it downstream. keep the raw grams.
+var billed_weight_kg = billed_weight_g / 1000.0;
+
+// transit days, null while the package is still moving
+var transit_days = null;
+if (delivered_at != null) {
+    transit_days = dateDiff(ship_time_utc, delivered_at, "d");
+}
+
+// TODO 2021-04-19 AM: dest_country is blank on about 300 rows a night from
+// the DC in Reno. the carrier file has it, our extract drops it. raise with
+// the WMS team.
+var dest_country_fixed = dest_country;
+if (dest_country == null || dest_country == "") {
+    dest_country_fixed = "US";
+}</jsScript_script>
+      </jsScript>
+    </jsScripts>
+    <fields>
+      <field>
+        <name>billed_weight_kg</name>
+        <rename>billed_weight_kg</rename>
+        <type>Number</type>
+        <length>-1</length>
+        <precision>3</precision>
+        <replace>N</replace>
+      </field>
+      <field>
+        <name>transit_days</name>
+        <rename>transit_days</rename>
+        <type>Integer</type>
+        <length>-1</length>
+        <precision>0</precision>
+        <replace>N</replace>
+      </field>
+      <field>
+        <name>dest_country_fixed</name>
+        <rename>dest_country</rename>
+        <type>String</type>
+        <length>2</length>
+        <precision>-1</precision>
+        <replace>Y</replace>
+      </field>
+    </fields>
+    <cluster_schema/>
+    <GUI><xloc>464</xloc><yloc>112</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>old accessorial split</name>
+    <type>Dummy</type>
+    <description>kept until the 2019 invoices fall out of retention. do not re-enable.</description>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <cluster_schema/>
+    <GUI><xloc>464</xloc><yloc>224</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>stamp the load</name>
+    <type>GetVariable</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <fields>
+      <field>
+        <name>load_id</name>
+        <variable>${LOAD_ID}</variable>
+        <type>Integer</type>
+        <format>#</format>
+        <currency/><decimal/><group/>
+        <length>-1</length>
+        <precision>0</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>stream_name</name>
+        <variable>${STREAM_NAME}</variable>
+        <type>String</type>
+        <format/><currency/><decimal/><group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+    </fields>
+    <cluster_schema/>
+    <GUI><xloc>640</xloc><yloc>112</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>write staging</name>
+    <type>TableOutput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <connection>copperline_wh</connection>
+    <schema>${STAGING_SCHEMA}</schema>
+    <table>carrier_scan</table>
+    <commit>2000</commit>
+    <truncate>N</truncate>
+    <ignore_errors>N</ignore_errors>
+    <use_batch>Y</use_batch>
+    <specify_fields>N</specify_fields>
+    <partitioning_enabled>N</partitioning_enabled>
+    <partitioning_field/>
+    <partitioning_daily>N</partitioning_daily>
+    <partitioning_monthly>Y</partitioning_monthly>
+    <tablename_in_field>N</tablename_in_field>
+    <tablename_field/>
+    <tablename_in_table>Y</tablename_in_table>
+    <return_keys>N</return_keys>
+    <return_field/>
+    <fields/>
+    <cluster_schema/>
+    <GUI><xloc>816</xloc><yloc>112</yloc><draw>Y</draw></GUI>
+  </step>
+  <step_error_handling/>
+  <slave-step-copy-partition-distribution/>
+  <slave_transformation>N</slave_transformation>
+</transformation>

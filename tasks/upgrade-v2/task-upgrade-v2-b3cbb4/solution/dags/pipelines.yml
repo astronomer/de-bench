@@ -1,0 +1,33 @@
+weekly_settlement:
+  default_args:
+    start_date: 2024-03-01
+    owner: payments
+  timetable:
+    __type__: airflow.timetables.trigger.CronTriggerTimetable
+    __args__:
+      - "0 2 * * 1"
+      - UTC
+  catchup: false
+  tasks:
+    gather_ledgers:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo gather_ledgers
+    reconcile:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo reconcile
+      dependencies: [gather_ledgers]
+
+invoice_dispatch:
+  default_args:
+    start_date: 2024-03-01
+    owner: payments
+  schedule: '@daily'
+  catchup: false
+  tasks:
+    render_invoices:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo render_invoices
+    deliver_invoices:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo deliver_invoices
+      dependencies: [render_invoices]

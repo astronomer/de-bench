@@ -1,0 +1,5 @@
+# The deliberately placed graded rows. Empty until tasks arrive: the world
+# ships correct and coherent, the tasks make it hard. Each entry names the
+# policy clause it tests and the tasks that grade it — config.load_planted
+# refuses anything less. See docs/authoring.md, "Generated data".
+[]

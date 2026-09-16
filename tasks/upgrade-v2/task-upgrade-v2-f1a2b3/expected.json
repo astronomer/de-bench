@@ -1,0 +1,4 @@
+{
+  "path": ["2.6.3", "2.10.x", "3.0.x"],
+  "rationale": "Airflow does not support direct 2.6 to 3.0; land on the 2.10 LTS line before the 3.x bump."
+}

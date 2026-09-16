@@ -1,0 +1,41 @@
+model_train:
+  default_args:
+    start_date: 2025-01-01
+  schedule_interval: '@daily'
+  catchup: false
+  tasks:
+    train:
+      operator: airflow.providers.cncf.kubernetes.operators.pod.KubernetesPodOperator
+      name: train-pod
+      image: ml/trainer:1.2.3
+      cmds: [python, train.py]
+      resources:
+        requests:
+          cpu: "2"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 16Gi
+      volumes:
+        - name: data-vol
+          persistent_volume_claim:
+            claim_name: ml-data
+      volume_mounts:
+        - name: data-vol
+          mount_path: /mnt/data
+
+model_score:
+  default_args:
+    start_date: 2025-01-01
+  schedule_interval: '@hourly'
+  catchup: false
+  tasks:
+    score:
+      operator: airflow.providers.cncf.kubernetes.operators.pod.KubernetesPodOperator
+      name: score-pod
+      image: ml/scorer:1.2.3
+      cmds: [python, score.py]
+      resources:
+        requests:
+          cpu: "1"
+          memory: 4Gi

@@ -1,0 +1,46 @@
+model_train:
+  default_args:
+    start_date: 2025-01-01
+  schedule: '@daily'
+  catchup: false
+  tasks:
+    train:
+      operator: airflow.providers.cncf.kubernetes.operators.pod.KubernetesPodOperator
+      name: train-pod
+      image: ml/trainer:1.2.3
+      cmds: [python, train.py]
+      resources:
+        __type__: kubernetes.client.models.V1ResourceRequirements
+        requests:
+          cpu: "2"
+          memory: 8Gi
+        limits:
+          cpu: "4"
+          memory: 16Gi
+      volumes:
+        - __type__: kubernetes.client.models.V1Volume
+          name: data-vol
+          persistent_volume_claim:
+            __type__: kubernetes.client.models.V1PersistentVolumeClaimVolumeSource
+            claim_name: ml-data
+      volume_mounts:
+        - __type__: kubernetes.client.models.V1VolumeMount
+          name: data-vol
+          mount_path: /mnt/data
+
+model_score:
+  default_args:
+    start_date: 2025-01-01
+  schedule: '@hourly'
+  catchup: false
+  tasks:
+    score:
+      operator: airflow.providers.cncf.kubernetes.operators.pod.KubernetesPodOperator
+      name: score-pod
+      image: ml/scorer:1.2.3
+      cmds: [python, score.py]
+      resources:
+        __type__: kubernetes.client.models.V1ResourceRequirements
+        requests:
+          cpu: "1"
+          memory: 4Gi

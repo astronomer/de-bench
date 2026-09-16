@@ -1,0 +1,2 @@
+apache-airflow==2.10.0
+flask-appbuilder==4.4.1

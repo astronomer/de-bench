@@ -1,0 +1,15 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/replenishment.md
+model: marts.inventory_position
+consumer: C-7
+owner: supply
+grain: [ds, sku, location_id]
+columns:
+  - {name: ds, type: date, required: true}
+  - {name: sku, type: string, required: true}
+  - {name: location_id, type: string, required: true}
+  - {name: on_hand_units, type: integer, required: true}
+  - {name: demand_units, type: integer, required: true}
+tests:
+  - unique: [ds, sku, location_id]
+  - not_null: [ds, sku, location_id, on_hand_units, demand_units]
+  - non_negative: [on_hand_units, demand_units]

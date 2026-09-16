@@ -1,0 +1,5 @@
+{
+  "python_bump_required": true,
+  "from": "3.11",
+  "to": "3.12"
+}

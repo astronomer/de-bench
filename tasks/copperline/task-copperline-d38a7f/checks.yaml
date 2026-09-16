@@ -1,0 +1,100 @@
+# The bug is one join in `projects/finance/lib/revenue.py`: the day's orders are
+# joined to `raw.stores` and a sale rung at an acquired counter is relabelled
+# `trade`. It is aggregate-plausible by construction. The relabelling is 1:1 on
+# `store_id`, so the day's total does not move a cent, `tie_to_orders` passes,
+# `check_cents` passes, `check_channels` still finds all four, and every run
+# goes green. The only thing that moves is the split — `trade` up and `store`
+# down by the same amount — which is what finance saw and nothing in the
+# pipeline can see.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.orders` in the same session.
+#
+# WHY NOTHING RUNS THE DAG. The world ships the landed half of the warehouse
+# (AGENTS.md, "The warehouse"): `int.int_orders_enriched` and
+# `marts.daily_revenue` are both derived, and neither is on disk until a
+# 143-model dbt build and a DAG run have made them. The verifier makes the two
+# relations from `raw.orders` and calls the patched build directly, which
+# grades the same code for seconds instead of half an hour. It also removes
+# the second reason a run would say nothing: a trial's patch never carries
+# anything under `include/data`, so a partition an agent republished by hand is
+# a partition no check can read.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code change   verifier: the three days
+#   the published files corrected by hand             verifier: same
+#   the join fixed only for the ticket's dates        verifier: 2026-02-25 and
+#                                                     2026-05-19
+#   the channel taken from `raw.orders` unfiltered    verifier: the test and
+#     (staging drops test orders and deleted rows)    soft-deleted orders move
+#                                                     both the count and the total
+#   a channel dropped to make the split move          verifier: every-channel test
+#   the day appended rather than replaced             verifier: rebuild test
+#   the tie or the channel check deleted to get green dag_structure
+#   the DAG or the module broken                      dag_parses
+#   a note that says only "fixed the join"            file_contains: the reach
+#                                                     beyond the week
+#
+# The graded days are 2026-03-04, 2026-02-25 and 2026-05-19. The ticket names a
+# fortnight and none of the three by name. All three sit outside the world's
+# reserved windows and outside the never-grade tail.
+replay: []
+
+checks:
+
+# The tree still imports, and the DAG is still there.
+- kind: dag_parses
+  dag_id: fin_revenue_daily
+
+# The house shape holds: wait, rebuild, check the money, check the channels,
+# tie to the spine, publish. A split that "moves" because the tie or the
+# channel check was deleted is not a fix, and the run checks cannot see the
+# difference.
+- kind: dag_structure
+  dag_id: fin_revenue_daily
+  task_ids:
+  - wait_for_orders
+  - build
+  - check_cents
+  - check_channels
+  - tie_to_orders
+  - publish
+  operators:
+    wait_for_orders: PythonSensor
+    build: PythonOperator
+    tie_to_orders: PythonOperator
+    publish: PythonOperator
+
+# The substance. See verifier/test_outputs.py — three days, the two rules the
+# ticket states, and a rebuild.
+- kind: pytest_verifier
+  file: test_outputs.py
+
+# The note finance asked for. Three decisions, and the headline "trade and
+# store" is one of them rather than all of them: the second pattern is the
+# population that moved, and the third is the answer to "how far does this
+# reach", which is the whole difference between repairing a week and fixing a
+# pipeline. Patterns are matched case-insensitively with re.search and are
+# written loose on purpose — each pins a figure or a named thing, never a
+# phrasing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The two channels that moved.
+  - '\btrade\b'
+  - '\bstore\b'
+  # What moved between them: the acquired estate.
+  - '(northwave|acquired)'
+  # How far it reaches. The ticket asks which published days are wrong, and
+  # the answer is not the fortnight finance pulled: the cause is live, so
+  # every day from 2 March to today is wrong. A reply that repairs the week
+  # and says the week was the problem fails here.
+  # "from 2 March on" joined after a 3-trial audit: "every day published from
+  # 2 March on is wrong" states the open-ended reach and matched nothing. The
+  # week-only wrong answers put "to" or "and" after the date, never "on".
+  - '(since[^\n]{0,60}(2 march|march 2|2026-03-02)|(every|all|each)[^\n]{0,40}(day|partition|file)s?[^\n]{0,30}(since|after|onward|through|up to)|(from|between)[^\n]{0,25}(2026-03-02|2 march|march 2)[^\n]{0,50}(today|now|onward|through|the last|2026-06)|(from|since)[^\n]{0,25}(2026-03-02|2 march|march 2)\s+(on|onwards?)\b|still[^\n]{0,60}(wrong|affected|live|there|in the code|in the build)|not (just|only)[^\n]{0,40}(that|the|this) (week|fortnight))'
+  # What a re-publish of those days would have given. The point of the ticket:
+  # the numbers come out of the code, so replaying the week before the fix
+  # republishes the same split.
+  - '(same[^\n]{0,25}(split|numbers|figures|answer|result|error|mix|output|rows)|no different|identical|would ?n.?t (help|change|fix)|reproduc|unchanged)'

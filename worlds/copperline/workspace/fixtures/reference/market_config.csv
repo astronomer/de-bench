@@ -1,0 +1,10 @@
+market_code,country_code,market_name,billing_currency,entity_code,tax_regime,tax_rate_bps,price_book_id,launched_on,is_active,owner,notes
+US,US,United States,USD,CL-US,us_sales_tax,700,PB-US-01,2009-03-14,true,P. Raman,row backfilled when this export was first cut for the 2025-04-07 launch
+CA,CA,Canada,USD,CL-US,us_sales_tax,1300,PB-CA-01,2014-05-05,true,P. Raman,no Canadian entity; the stores invoice out of Oregon and bill USD
+GB,GB,Great Britain,GBP,CL-GB,uk_vat,2000,PB-GB-01,2025-04-07,true,M. Feld,
+IE,IE,Ireland,EUR,CL-IE,eu_vat,2300,PB-IE-01,2025-04-07,true,M. Feld,
+DE,DE,Germany,EUR,CL-DE,eu_vat,1900,PB-DE-01,2025-04-07,true,M. Feld,
+MX,MX,Mexico,MXN,CL-MX,mx_iva,1600,PB-MX-01,2026-02-01,true,A. Sotelo,first market of the second wave with its own entity
+BR,BR,Brazil,USD,CL-US,us_sales_tax,1700,PB-BR-01,2026-02-01,true,D. Blake,cross-border merchant of record; no local entity yet
+PL,PL,Poland,EUR,CL-IE,eu_vat_oss,2300,PB-PL-01,2026-02-01,true,D. Blake,launched under the Irish entity on EU VAT OSS; bills EUR and not PLN
+ID,ID,Indonesia,USD,CL-US,us_sales_tax,1100,PB-ID-01,2026-02-01,true,L. Nkemdirim,same cross-border arrangement as BR

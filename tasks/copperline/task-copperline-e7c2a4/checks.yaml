@@ -1,0 +1,181 @@
+# The whole ticket is one join, and the work is proving what the join can and
+# cannot be.
+#
+# The world ships `projects/commerce/sql/recon_match.sql` reaching the bridge on
+# `i.order_id = try_cast(o.order_id AS BIGINT)`. Our order keys are
+# `ORD-########`, so that cast is NULL on all 3,436,578 rows of `raw.orders`
+# (measured: `select count(*) from raw.orders where try_cast(order_id as bigint)
+# is not null` is 0) and the join has matched nothing since it was written. Both
+# joins are LEFT, so nothing raises at the step itself: every order falls
+# through with a NULL event and R-7 has the whole order book to file as
+# `no_payment`. A recon that never matched.
+#
+# THE ID COLUMNS GENUINELY DIFFER, AND NOT ONLY IN FORMAT. This is the fact the
+# ticket is built on, so here is the proof rather than the claim. The digits
+# inside `raw.orders.order_id` run 1 to 3,436,578 and are dense — the table is
+# 3,436,578 rows. `raw.payment_intents.order_id` runs 8,840,127 to 181,202,656,
+# over 920,929 distinct values in 1,194,355 rows. The two ranges do not touch:
+# `select count(*) from raw.payment_intents where order_id <= 3436578` is 0, and
+# `raw.orders o join raw.payment_intents i on i.order_id =
+# try_cast(substr(o.order_id, 5) as bigint)` returns 0 rows over the whole
+# range. So there is no prefix strip, no lpad, no zero-fill and no format repair
+# that makes that column reach `raw.orders`. It is the processor's own counter —
+# `stg_payments__payment_intents` already renames it `processor_order_key` — and
+# `worlds/copperline/PLANTED.md` rules it furniture. The fix is a different
+# link, never a repaired one.
+#
+# THE HONEST LINK is `order_ref` plus the attempt's own date. The OMS recycles a
+# seven-digit reference about every fifty days (3,436,578 orders over 570,523
+# distinct references), so the reference alone names several orders; an attempt
+# is raised a day or two after its order, so the reference plus a window either
+# side names exactly one. `int_orders_enriched` already matches orders to
+# attempts by that rule with a seven-day window and
+# `stg_payments__payment_intents`'s docstring says why. Measured across the
+# three graded days, every window from two days to forty-five gives the
+# identical answer, row for row; at forty-nine the recycle starts colliding and
+# the row count rises by half again or more (6,742 to 11,316 on 2025-11-12);
+# with no window at all it is five to six times the honest answer.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from `raw.orders`, `raw.payment_intents` and
+# `raw.pay_meridian_settlements` in the same session, and its first test proves
+# each graded day can still tell the wrong answers apart from the right one.
+# The figures in this comment are derivations, quoted so a reviewer can rerun
+# them; no check compares against any of them.
+#
+# WHY NOTHING RUNS THE DAG. `payments_recon_daily` cannot reach its last step in
+# this warehouse. The world ships the landed half only (`AGENTS.md`, "The
+# warehouse") — the shipped file has `raw`, `ops` and nothing above them, not
+# even the `staging` schema — and no file in the tree creates
+# `staging.recon_found`, `staging.closed_periods` or `marts.recon_exceptions`,
+# so the first finder dies on a missing table. The verifier makes the `staging`
+# schema itself, once, before anything runs; that is scenery, and a fix that
+# creates the schema as well finds it there already and passes just the same.
+# On top of that the DAG has two retries ten minutes apart, so a failing run
+# would cost twenty minutes an arm. The subject is the first step; the verifier
+# calls it directly and grades the same code in about three seconds. That also
+# removes the shortcut — a day typed into `staging.recon_matched` by hand is a
+# day the next call replaces before anything reads it. Both faults are recorded
+# in `worlds/copperline/PLANTED.md`'s flaw inventory.
+#
+# WHY NO `unchanged` CHECK. There is nothing for one to watch. The only relation
+# this step writes is the one the verifier grades directly, and it moves on
+# every graded day by design. The day that must not move is graded instead by
+# the verifier's `test_a_day_before_the_processor_existed_is_left_exactly_as_it_
+# was`: 2025-03-11 sits before Meridian took any traffic, so the honest link and
+# the shipped one give the same rows there, and a fix that changes the grain
+# fails there while passing nothing else. Writing to the warehouse is not a
+# route either — a trial's patch carries nothing under `include/data`, so the
+# scored container rebuilds `raw.*` from the image and recomputes the answer.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no change    verifier: the three graded
+#                                                 days
+#   the cast tightened but still aimed at         verifier: still 0 events.
+#     `raw.payment_intents.order_id` — cast the   Measured above: the two
+#     order key to text, strip `ORD-`, lpad it,   number ranges do not touch
+#     zero-fill it, coalesce it
+#   `order_ref` joined straight through, no       verifier: the graded days
+#     clock                                       (five to six times the rows)
+#                                                 and the quiet day
+#   `order_ref` plus a window wide enough to      verifier: the graded days —
+#     swallow the recycle (49 days or more)       the recycle collides and the
+#                                                 row count jumps
+#   the bridge joined on `order_ref` and          verifier: the graded days.
+#     `attempt_no` instead of `intent_id`         Attempt 1 of several orders
+#   the LEFT joins made INNER to "make the        verifier: the quiet day and
+#     match work"                                 the every-order test. R-7
+#                                                 loses `no_payment` entirely
+#   `int_orders_enriched.payment_intent_id`       verifier: the graded days.
+#     reused as the order-to-payment link         That model keeps ONE attempt
+#                                                 per order, so every event of
+#                                                 a retried order's other
+#                                                 attempts falls out
+#   the exception list made smaller by            dag_structure: the finder is
+#     dropping the `unmatched` finder, the        named. And the verifier
+#     publish step, or the whole thing            grades the matched table
+#                                                 itself, which the DAG's
+#                                                 shape cannot fake
+#   `raw.payment_intents` rewritten so the        verifier: the scored
+#     column does resolve                         container rebuilds `raw.*`
+#                                                 from the image, so the
+#                                                 rewrite is not there
+#   the three days corrected by hand in           verifier: it runs the step
+#     `staging.recon_matched`                     itself first
+#   a step added to the DAG — a DDL task for      dag_structure: the task-id set
+#     the ladder's working tables, a sensor       is exact, and the ticket says
+#     in front of the match                       one statement and no new steps
+#   the DAG or the statement broken               dag_parses
+#
+# WHAT IS NOT CONVICTED, on purpose:
+#
+#   * The window width. Anything from two days to forty-five gives the identical
+#     rows on all four days here, for the reason measured above. The ticket
+#     states no width and `int_orders_enriched` uses seven.
+#   * Keeping or dropping `s.attempt_no = i.attempt_no` on the settlement join.
+#     `intent_id` is one per attempt already, so the extra predicate drops
+#     nothing — measured: no Meridian event anywhere in the feed disagrees with
+#     its own intent's `attempt_no`.
+#   * Where the fix lands. The verifier calls the DAG's `match_payments`, so a
+#     fix written into `recon_match.sql`, into the callable, or into a new
+#     statement beside it all grade the same.
+#   * Extra columns on `staging.recon_matched`. The verifier selects the eight
+#     the table has always carried by name; more is a defensible reading of a
+#     working table, fewer fails to read at all.
+#   * A row for a processor event with no order at all — R-7's other direction,
+#     `no_order`, which this step has never been able to produce because it
+#     starts from the order book. The ticket does not ask for it and the
+#     verifier grades only the rows that name an order, so an agent who adds the
+#     other direction as well is not punished for it.
+#   * A `CREATE SCHEMA IF NOT EXISTS staging` added by the fix. The warehouse
+#     ships without the schema, so an agent who tries a day locally will meet
+#     that and may well add it. The verifier makes the schema first, so the
+#     addition is a no-op and its absence is not a fault. What the step must
+#     still do is return the row count, which is graded on its own.
+#   * Repairing the rest of the ladder. The ticket says leave it; nothing here
+#     looks at it beyond the DAG's shape.
+#
+# The graded days are 2025-11-12, 2026-01-08, 2026-04-22 and, for the day that
+# must not move, 2025-03-11. The ticket names no date at all. None of the four
+# is a closure day or a spike day, none is named by any other copperline ticket,
+# and the three that grade the fix sit months clear of the 2025 processor
+# overlap quarter.
+replay: []
+
+checks:
+
+# The tree still imports and the DAG is still there. A statement file the
+# callable can no longer read is a parse failure here.
+- kind: dag_parses
+  dag_id: payments_recon_daily
+
+# The ladder's shape. `docs/reconciliation-policy.md` is worked one clause per
+# task and the DAG is that document in order, so a fix that shrinks the
+# exception list by deleting the finder that fills it, or by dropping the
+# publish step, is not a fix. The three finders are built in a loop from
+# `FINDERS`, which is why they are named individually here — a loop with an
+# entry taken out still renders a valid DAG.
+- kind: dag_structure
+  dag_id: payments_recon_daily
+  task_ids:
+  - match_payments
+  - apply_dispute_override
+  - find_amount_mismatch
+  - find_state_mismatch
+  - find_unmatched
+  - age_disagreements
+  - book_closed_period_adjustments
+  - publish_exceptions
+  - check_totals
+  operators:
+    match_payments: PythonOperator
+    find_unmatched: PythonOperator
+    publish_exceptions: PythonOperator
+
+# The substance. See verifier/test_outputs.py — three days the ticket does not
+# name, a fourth where nothing may move, the grain rule the ticket states, the
+# reported count and a rerun.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

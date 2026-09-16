@@ -1,0 +1,21 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/merch-dashboards.md
+#
+# Amended: `channel` takes `trade`. The trade book moved onto the order spine
+# and the mart has published those orders ever since; the register of selling
+# channels is dbt/copperline_analytics/models/shared/dims/dim_channel.sql and it
+# holds four. The list stays a list — a channel outside it is still a violation.
+model: marts.order_economics
+consumer: C-4
+owner: commerce
+grain: [order_id]
+columns:
+  - {name: order_id, type: string, required: true}
+  - {name: order_date, type: date, required: true}
+  - {name: channel, type: string, required: true, accepted_values: [store, web, marketplace, trade]}
+  - {name: booked_cents, type: bigint, required: true}
+  - {name: net_sales_cents, type: bigint, required: true}
+  - {name: merch_margin_cents, type: bigint, required: false}
+tests:
+  - unique: [order_id]
+  - not_null: [order_id, order_date, channel, booked_cents, net_sales_cents]
+  - no_floats_in: [booked_cents, net_sales_cents, merch_margin_cents]

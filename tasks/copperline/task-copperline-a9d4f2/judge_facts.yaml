@@ -1,0 +1,76 @@
+# The judge's answer key for this task's RESPONSE.md prose checks — what each
+# check requires, as plain facts. Generated from the regex patterns and rubric
+# comments in checks.yaml, calibrated against the solution, and reviewed; the
+# patterns in checks.yaml remain as provenance. Grading semantics: a check
+# passes only if the answer states at least one fact from EVERY group; stating
+# anything in `convicts` fails the check outright. `seq` is the check's
+# ordinal among this task's file_contains checks on RESPONSE.md, in file
+# order — the same order score.json labels them.
+checks:
+- seq: 0
+  background: 'The write-up. Patterns are matched case-insensitively under re.DOTALL and are
+
+    written loose: each pins a name or a stated fact, never a phrasing.
+
+    Both measures named, so the reply says which was which. Naming them is nearly
+
+    free — the ticket is about two numbers — which is why it is one check with
+
+    the cheap half and not three.'
+  groups:
+  - any_of:
+    - Names reported_cents as the measure the board pack's revenue line must show (the contract-mandated
+      column, sourced from the account rollup mart).
+  - any_of:
+    - Names recognized_cents (or recognised_cents / 'recognized revenue') as the measure the
+      page was actually showing, i.e. the wrong one taken from the revenue-recognized monthly
+      mart.
+  convicts:
+  - Claims reported_cents and recognized_cents are the same measure, or that the gap is only
+    rounding/pennies rather than excluded rows (legacy-era plans and refunds/credit memos).
+  - Recommends relabelling the board pack column header to recognized_cents (or otherwise
+    redefining the contract column) instead of switching the query to reported_cents from
+    the account rollup.
+  - Says the board pack should keep sourcing its revenue line from marts.revenue_recognized_monthly.
+- seq: 1
+  background: 'What the difference is made of. This is the earned half: an agent that moved
+
+    the column without working out why the two numbers differ cannot name the
+
+    legacy-era exclusion, and the ticket asks for it in as many words. Refunds
+
+    are the other half and either spelling of them counts.'
+  groups:
+  - any_of:
+    - The answer identifies the legacy-era exclusion as a component of the difference between
+      the two numbers
+    - The answer names legacy records/rows (e.g., pre-migration or legacy-system data) as
+      being excluded from one of the totals
+    - The answer explains that the legacy filter or legacy cutoff accounts for part of the
+      discrepancy
+  - any_of:
+    - The answer identifies refunds as a component of the difference
+    - The answer refers to credit memos (credit_memo) as contributing to the difference
+    - The answer states that credited amounts are included in one total but not the other
+  convicts:
+  - The answer only describes moving/relocating the column without explaining why the two
+    numbers differ
+  - The answer claims the two numbers are identical or that there is no discrepancy to explain
+  - The answer attributes the entire difference to something other than the legacy exclusion
+    and refunds/credit memos
+  - The answer states it cannot determine the cause of the difference
+- seq: 2
+  background: 'What says so. The clause id, the file or the stated rule all count, because
+
+    all three are the same answer. What does not count is a reply that treats the
+
+    choice as a preference.'
+  groups:
+  - any_of:
+    - cites the clause id (e.g. SD-2, BP-1, BP-2) as what says so
+    - names the file (semantic-definitions, board-pack.md, or account_rollup.yml) as the source
+    - states the governing rule itself as the authority for the answer
+  convicts:
+  - treats the choice between the definitions as a matter of preference or taste
+  - says either option is acceptable / it's up to the user to pick
+  - gives no source or authority for the answer

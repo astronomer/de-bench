@@ -1,0 +1,77 @@
+# The judge's answer key for this task's RESPONSE.md prose checks — what each
+# check requires, as plain facts. Generated from the regex patterns and rubric
+# comments in checks.yaml, calibrated against the solution, and reviewed; the
+# patterns in checks.yaml remain as provenance. Grading semantics: a check
+# passes only if the answer states at least one fact from EVERY group; stating
+# anything in `convicts` fails the check outright. `seq` is the check's
+# ordinal among this task's file_contains checks on RESPONSE.md, in file
+# order — the same order score.json labels them.
+checks:
+- seq: 0
+  background: 'The write-up. Patterns are matched case-insensitively under re.DOTALL and are
+
+    written loose: each pins a name or a stated fact, never a phrasing.
+
+    What was delivered. The page''s new length, in either spelling, next to the
+
+    unit it counts — a bare "13" matches any date or row number in the page.'
+  groups:
+  - any_of:
+    - States the new length as thirteen (or 13) together with the unit it counts, e.g. 'thirteen
+      fiscal months', '13 closed periods', '13-month period'
+  convicts:
+  - Gives the new length as a bare number with no unit attached (e.g. just '13' standing alone
+    as a date or row number)
+  - States a length other than thirteen months/periods
+- seq: 1
+  background: 'What was asked for and not delivered. Naming the weekly ask is free — the
+
+    ticket names it — so the earned half is the second pattern: the route the
+
+    house takes when a ticket and a contract disagree. A reply that says "moved
+
+    the page to fiscal weeks" satisfies the first pattern and then fails the
+
+    verifier, which is the point; a reply that says nothing about the weekly ask
+
+    at all fails here.'
+  groups:
+  - any_of:
+    - The reply names the weekly ask — that the ticket requested the reporting be at a weekly
+      / fiscal-week / by-week grain.
+    - The reply refers to the requested week grain (weekly, fiscal week, by week, week grain)
+      as what was asked for.
+  - any_of:
+    - The reply says the conflict between the ticket and the contract is resolved by changing
+      the contract — an amendment, renegotiation, or revision to the contract.
+    - The reply says the weekly grain requires sign-off / approval / agreement from finance
+      (or the counterparty) before it can be delivered.
+    - The reply describes escalating the ticket-vs-contract disagreement to a contract change
+      or formal approval rather than shipping the change unilaterally.
+  convicts:
+  - The reply claims the page was simply moved/switched to fiscal weeks (weekly grain delivered)
+    without any contract amendment, approval, or sign-off.
+  - The reply says the weekly ask was implemented as requested with no mention of the contract
+    conflict.
+  - The reply says nothing about the weekly / fiscal-week / by-week ask at all.
+- seq: 2
+  background: 'Which clause stopped it. Loose on purpose: the clause id, the file, or the
+
+    stated rule all count, because all three are the same answer. What does not
+
+    count is a reply that treats the refusal as a preference.'
+  groups:
+  - any_of:
+    - Names the blocking clause by id, e.g. BP-3 or CM-1
+    - Points to the source that stopped it, e.g. the change-management contract or board-pack.md
+    - States the governing rule, e.g. that the contract governs / contracts govern the change
+  - any_of:
+    - States the grain that conflicts, e.g. the data is monthly
+    - Says the required grain is per fiscal month
+    - Identifies the grain mismatch as the reason the clause blocks it
+  convicts:
+  - Frames the refusal as a preference or stylistic choice rather than a binding rule
+  - Says the block could be waived or overridden at the user's discretion without amending
+    the contract
+  - Treats the clause as advisory, a guideline, or a recommendation instead of a hard constraint
+  - Fails to attribute the block to any clause, file, or rule at all

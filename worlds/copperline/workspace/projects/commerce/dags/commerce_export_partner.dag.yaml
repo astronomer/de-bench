@@ -1,0 +1,44 @@
+dag_id: commerce_export_partner
+schedule: "0 9 * * *"
+description: daily order-economics partition files for the two partner accounts
+default_args:
+  owner: commerce
+  retries: 2
+tags: [commerce, export, partner]
+steps:
+  wait_for_economics:
+    blueprint: sensor_wait
+    asset: marts.order_economics
+    partition_col: order_date
+    timeout: 7200
+    poke_interval: 300
+  export_ironwood:
+    blueprint: partition_export
+    depends_on: [wait_for_economics]
+    source: marts.order_economics
+    layer: partners
+    name: order_economics_ironwood
+    columns: [order_id, order_date, channel, booked_cents, net_sales_cents]
+    order_by: [order_id]
+    partition_col: order_date
+    where: "channel <> 'marketplace'"
+  export_kestrel:
+    blueprint: partition_export
+    depends_on: [wait_for_economics]
+    source: marts.order_economics
+    layer: partners
+    name: order_economics_kestrel
+    columns: [order_id, order_date, channel, booked_cents, net_sales_cents]
+    order_by: [order_id]
+    partition_col: order_date
+    where: "channel = 'marketplace'"
+  check_coverage:
+    blueprint: sql_file
+    depends_on: [export_ironwood, export_kestrel]
+    statement: partner_export_coverage
+    params: ["{{ ds }}"]
+  record:
+    blueprint: sql_file
+    depends_on: [check_coverage]
+    statement: partner_export_record
+    params: ["{{ ds }}"]

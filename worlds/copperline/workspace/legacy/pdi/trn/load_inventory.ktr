@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <info>
+    <name>load_inventory</name>
+    <description>raw.inventory_snapshots into the staging schema, cut at the mark.</description>
+    <extended_description/>
+    <trans_version>1.9</trans_version>
+    <trans_type>Normal</trans_type>
+    <directory>/copperline/nightly/trn</directory>
+    <parameters/>
+    <feedback_shown>Y</feedback_shown>
+    <feedback_size>50000</feedback_size>
+    <using_thread_priorities>Y</using_thread_priorities>
+    <created_user>amireles</created_user>
+    <created_date>2019/03/14 08:19:55.230</created_date>
+    <modified_user>amireles</modified_user>
+    <modified_date>2020/02/17 11:41:06.882</modified_date>
+  </info>
+  <connection>
+    <name>copperline_wh</name>
+    <server>${CPL_WH_HOST}</server>
+    <type>GENERIC</type>
+    <access>Native</access>
+    <database>${CPL_WH_DB}</database>
+    <port>0</port>
+    <username>${CPL_WH_USER}</username>
+    <password>Encrypted 2be98afc86aa7f2e4cb14a9d61c2f8b1c</password>
+  </connection>
+  <order>
+    <hop><from>read raw.inventory_snapshots</from><to>stamp the load</to><enabled>Y</enabled></hop>
+    <hop><from>stamp the load</from><to>write staging</to><enabled>Y</enabled></hop>
+  </order>
+  <step>
+    <name>read raw.inventory_snapshots</name>
+    <type>TableInput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <connection>copperline_wh</connection>
+    <sql>SELECT snapshot_date
+     , sku
+     , location_id
+     , dept_code
+     , on_hand_units
+     , reserved_units
+     , in_transit_units
+     , unit_cost_cents
+     , retail_value_cents
+     , loaded_at
+  FROM raw.inventory_snapshots
+ WHERE snapshot_date &lt;= DATE '${BUSINESS_DATE}'
+   AND ${LOAD_FROM_COLUMN} &gt; TIMESTAMP '${LOAD_FROM}'</sql>
+    <limit>0</limit>
+    <lookup/>
+    <execute_each_row>N</execute_each_row>
+    <variables_active>Y</variables_active>
+    <lazy_conversion_active>N</lazy_conversion_active>
+    <cluster_schema/>
+    <GUI><xloc>112</xloc><yloc>96</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>stamp the load</name>
+    <type>GetVariable</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <fields>
+      <field>
+        <name>load_id</name>
+        <variable>${LOAD_ID}</variable>
+        <type>Integer</type>
+        <format>#</format>
+        <currency/><decimal/><group/>
+        <length>-1</length>
+        <precision>0</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>stream_name</name>
+        <variable>${STREAM_NAME}</variable>
+        <type>String</type>
+        <format/><currency/><decimal/><group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+    </fields>
+    <cluster_schema/>
+    <GUI><xloc>320</xloc><yloc>96</yloc><draw>Y</draw></GUI>
+  </step>
+  <step>
+    <name>write staging</name>
+    <type>TableOutput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <connection>copperline_wh</connection>
+    <schema>${STAGING_SCHEMA}</schema>
+    <table>inventory_balance</table>
+    <commit>5000</commit>
+    <truncate>N</truncate>
+    <ignore_errors>N</ignore_errors>
+    <use_batch>Y</use_batch>
+    <specify_fields>N</specify_fields>
+    <partitioning_enabled>N</partitioning_enabled>
+    <partitioning_field/>
+    <partitioning_daily>N</partitioning_daily>
+    <partitioning_monthly>Y</partitioning_monthly>
+    <tablename_in_field>N</tablename_in_field>
+    <tablename_field/>
+    <tablename_in_table>Y</tablename_in_table>
+    <return_keys>N</return_keys>
+    <return_field/>
+    <fields/>
+    <cluster_schema/>
+    <GUI><xloc>512</xloc><yloc>96</yloc><draw>Y</draw></GUI>
+  </step>
+  <step_error_handling/>
+  <slave-step-copy-partition-distribution/>
+  <slave_transformation>N</slave_transformation>
+</transformation>

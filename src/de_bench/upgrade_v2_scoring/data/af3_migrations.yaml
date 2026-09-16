@@ -1,0 +1,206 @@
+# Airflow 2 -> 3 migration signals consumed by scoring primitives.
+#
+# Each key below powers at least one primitive. Adding a new AF2->AF3
+# break usually means one entry here + an oracle task fixture; no Python
+# edit needed unless the detection *shape* is new (not just a new symbol
+# to match).
+#
+# Source for every entry: the Apache Airflow 3 release notes and the
+# method's introduction / removal PR.
+
+# Airflow-core import-path roots removed or relocated in AF3. Matches
+# exactly or any submodule (`airflow.contrib.foo.bar` matches
+# `airflow.contrib`). The data accessor unions this list with
+# `provider_removals.yaml::removed_modules` for the provider-side
+# relocations that customers hit alongside AF3, so the consumer
+# primitives (`no_deprecated_imports`, `imports_clean_across_sibling_pkgs`)
+# see a single combined set.
+#
+# The shorter `airflow.operators.python` and `.bash` aliases are
+# still re-exported in some builds but the idiomatic AF3 path is
+# `airflow.providers.standard.operators.<name>` (Airflow core no
+# longer vendors the standard operators). Similarly
+# `airflow.utils.task_group.TaskGroup` moved to
+# `airflow.sdk.TaskGroup` — the bench treats legacy paths as
+# deprecated regardless of whether the re-export happens to still
+# work in a given patch release.
+removed_modules:
+  - airflow.contrib
+  - airflow.utils.dates
+  - airflow.utils.task_group
+  - airflow.operators.python_operator
+  - airflow.operators.python
+  - airflow.operators.bash_operator
+  - airflow.operators.bash
+  - airflow.sensors.external_task
+  - airflow.utils.decorators
+  - airflow.utils.session
+
+# Context variables removed when AF3 split task-instance context from
+# the legacy Jinja context. Matched as whole words only (word-boundary
+# regex), so `some_prev_ds_hint` does not false-positive on `prev_ds`.
+# Consumed by `no_deprecated_context_vars`.
+deprecated_context_vars:
+  - execution_date
+  - yesterday_ds
+  - tomorrow_ds
+  - prev_execution_date
+  - next_execution_date
+  - prev_ds
+  - next_ds
+
+# Airflow-core operator/DAG kwargs removed in AF3. Matched as
+# `\b<kw>\s*=`. The data accessor unions this list with
+# `provider_removals.yaml::deprecated_kwargs` for the provider-side
+# kwarg removals (cncf-kubernetes ≥10's `is_delete_operator_pod`,
+# snowflake ≥6's `snowflake_conn_id`). Consumed by
+# `no_deprecated_usage`.
+deprecated_kwargs:
+  - schedule_interval
+  - provide_context
+  - execution_timeout_str
+  - fail_stop
+  - sla_miss_callback
+
+# Airflow-core operator/symbol names removed in AF3. Matched as
+# whole words. The data accessor unions this list with
+# `provider_removals.yaml::removed_symbols` for provider-side
+# removals (BigQueryExecuteQueryOperator on google ≥10,
+# SnowflakeOperator on snowflake ≥6). Consumed by
+# `no_deprecated_usage`.
+removed_symbols:
+  - SubDagOperator
+  - ExternalTaskSensorLink
+  - apply_defaults
+  - Dataset  # renamed to `Asset` in airflow.sdk
+
+# Stepping-stone Airflow versions recognised as valid intermediate
+# pins on a 2.x -> 3.x upgrade. `apache-airflow==<v>` with any of
+# these counts as respecting the stepping-stone rule.
+# Consumed by `stepping_stone_respected`.
+stepping_stone_floor:
+  - "2.10"
+  - "2.11"
+
+# Import-path roots that are AF3-only — agents that pull these in
+# while targeting a 2.x runtime have applied 3.x rules to a
+# minor-version bridge. Distinct from `removed_modules` (which
+# describes 2.x paths gone in 3.x): this is the inverse direction,
+# 3.x paths the agent must NOT introduce when target.airflow is 2.y.
+# Matches exactly or any submodule.
+# Consumed by `no_af3_only_imports`.
+af3_only_modules:
+  - airflow.sdk
+
+# Detection pattern for "trigger / plugin class defined inside the
+# dag bundle" — AF3's triggerer runs without a bundle on sys.path, so
+# trigger modules must live in a sibling package.
+# Consumed by `triggers_outside_bundle`.
+in_bundle_forbidden_pattern: 'class\s+\w+\s*\([^)]*Trigger(?:Base)?\b|from\s+airflow\.triggers\.base\s+import|class\s+\w+\s*\([^)]*AirflowPlugin\b'
+
+# Top-level directories that are NOT "sibling Python packages" when a
+# multi-package task is scored. `dags/` is the bundle itself (scored
+# separately). `solution/` used to be overlaid into the working dir
+# but is now kept outside; the entry is kept for defence-in-depth in
+# case a future task layout brings it back. `__pycache__` is the
+# runtime cache. Consumed by `imports_clean_across_sibling_pkgs`.
+sibling_skip_dirs:
+  - dags
+  - solution
+  - __pycache__
+
+# Direct-ORM access patterns forbidden in AF3. The scheduler no
+# longer exposes `settings.Session()` to DAG code; task-instance
+# and dag-run queries must go through the Task-SDK IPC surface
+# (`ti.get_task_states`, `ti.get_previous_dagrun`, `ti.get_dr_count`).
+# Matched case-sensitively as full tokens. Consumed by `no_orm_access`.
+forbidden_orm_patterns:
+  - 'settings\.Session\s*\('
+  - '\bmodels\.TaskInstance\b'
+  - '\bmodels\.DagRun\b'
+  - '\bmodels\.TaskReschedule\b'
+  - 'from\s+airflow\s+import\s+[^#\n]*\bsettings\b'
+  - 'from\s+airflow\s+import\s+[^#\n]*\bmodels\b'
+  - 'from\s+airflow\.models\s+import\s+[^#\n]*\b(?:TaskInstance|DagRun|TaskReschedule)\b'
+  # `session.execute(...)` and `session.query(...)` against Airflow's
+  # session are the two ways ORM leaks creep in even when `settings`
+  # and `models` imports are tidied up. Catch both.
+  - '\bsession\.execute\s*\('
+  - '\bsession\.query\s*\('
+  # `dag_run.get_task_instances(state=...)` reaches into the ORM under
+  # the hood; AF3 replaces this with `ti.get_task_states(...)`.
+  - '\bdag_run\.get_task_instances\s*\('
+  - '\bdagrun\.get_task_instances\s*\('
+  # `@provide_session` decorator — DAG-author code can't ask for a
+  # session in AF3.
+  - '@provide_session\b'
+
+# Attribute access patterns removed from Airflow 3's TaskInstance
+# surface. Replacement paths:
+#  - `ti.operator`  ->  `ti.task.task_type`   (operator class name)
+#  - `ti.execution_date`  ->  `ti.logical_date`
+#  - `ti.task_instance_key_str`  removed; reconstruct via
+#    `f"{ti.dag_id}__{ti.task_id}__{ti.run_id}"` where needed.
+# Matched as whole tokens on both `ti.` and `task_instance.` prefixes.
+#
+# The alternate-access forms below catch the same removed attrs reached
+# WITHOUT the bare `ti.<attr>` / `task_instance.<attr>` spelling — the
+# subscript / getattr dodges an agent reaches for after the obvious
+# patterns are flagged:
+#  - subscript:  context["execution_date"], ti["execution_date"]
+#  - dict.get:   context.get("execution_date")
+#  - getattr:    getattr(ti, "execution_date")
+# `execution_date` is the only one of the three that was also a Jinja
+# context key (so the subscript / `.get(...)` forms apply); `operator`
+# and `task_instance_key_str` are TI-only attributes, but the getattr
+# dodge applies to all three.
+# Consumed by `no_removed_ti_attrs`.
+forbidden_ti_attr_patterns:
+  - '\bti\.operator\b'
+  - '\btask_instance\.operator\b'
+  - '\bti\.task_instance_key_str\b'
+  - '\btask_instance\.task_instance_key_str\b'
+  # `execution_date` was removed from EVERY AF3 surface — TaskInstance
+  # AND DagRun both replaced it with `logical_date`. So any attribute
+  # access `<anything>.execution_date` is a break regardless of the
+  # receiver's name. This blanket pattern subsumes the old per-receiver
+  # spellings (`ti.execution_date`, `task_instance.execution_date`,
+  # `dag_run.execution_date`, `context.dag_run.execution_date`) and
+  # closes the "rename the ti variable then read `.execution_date`"
+  # dodge. The required leading `.` and trailing `\b` keep it safe:
+  # `logical_date`, a bare local `execution_date = ...`,
+  # `my_execution_date` (the char before `execution_date` is `_`, not
+  # `.`), and `execution_date_xyz` (no word boundary before `_`) all
+  # pass. The comment/docstring stripper runs before this scan, so a
+  # `# dag_run.execution_date was removed` comment does not trip it.
+  - '\.execution_date\b'
+  # Subscript access to the removed `execution_date` context key:
+  # context["execution_date"], ctx['execution_date'], ti["execution_date"].
+  - '\[\s*[''"]execution_date[''"]\s*\]'
+  # dict.get access: context.get("execution_date").
+  - '\.get\s*\(\s*[''"]execution_date[''"]'
+  # getattr dodge for any of the removed TI attrs:
+  # getattr(ti, "execution_date"), getattr(task_instance, "operator").
+  - 'getattr\s*\([^,]+,\s*[''"](?:execution_date|operator|task_instance_key_str)[''"]'
+
+# Task-SDK IPC method availability on Airflow 3.x. Each value is
+# the earliest Airflow version that ships the method — calls to a
+# method not yet shipped raise AttributeError at runtime.
+#
+# Two primitives consume this map:
+#   - `uses_task_sdk_ipc` (presence-required): did the agent reach
+#     for IPC at all?
+#   - `task_sdk_ipc_version_aware` (version-aware negative check):
+#     is every IPC call available at the project's pinned Airflow
+#     version? An agent writing for AF 3.0 that calls
+#     `get_previous_ti` produces code that fails on 3.0.x / 3.1.x.
+#
+# Entries below are a representative sample; add more as new tasks
+# need them. Source for each `since` value: Airflow release notes
+# / the method's introduction PR.
+task_sdk_ipc_methods:
+  get_task_states: "3.0.0"
+  get_previous_dagrun: "3.0.0"
+  get_dr_count: "3.0.0"
+  get_dagrun_state: "3.0.0"
+  get_previous_ti: "3.2.0"

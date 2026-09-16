@@ -1,0 +1,46 @@
+# Where a segment goes, and what the destination calls things.
+#
+# `contracts/audience-sync.md` binds the delivery; this file binds the
+# addressing. The rows are the same everywhere — one per customer per segment
+# per day, out of `marts.audience_segments` — and what differs is the column
+# names each platform insists on and the identifier it matches people by.
+#
+# Adding a segment here puts it in the next morning's delivery. Removing one
+# stops the delivery and does NOT clear the audience at the platform; that is
+# a job somebody does in the platform's own console.
+
+destinations:
+  halyard_crm:
+    endpoint: crm/segments
+    conn_id: copperline_api
+    identifier: customer_id
+    segment_field: segment_code
+    identifier_field: account_id
+    segments:
+      - trade_lapsed_90d
+      - trade_growth_watch
+      - trade_high_value
+      - trade_new_account
+
+  beacon_ads:
+    endpoint: ads/beacon/audiences
+    conn_id: copperline_api
+    identifier: contact_hash
+    segment_field: audience_name
+    identifier_field: hashed_email
+    segments:
+      - trade_high_value
+      - trade_lapsed_90d
+      - consumer_cart_abandon
+      - consumer_seasonal_outdoor
+
+  tessera_social:
+    endpoint: ads/tessera/audiences
+    conn_id: copperline_api
+    identifier: contact_hash
+    segment_field: list_name
+    identifier_field: match_key
+    segments:
+      - trade_high_value
+      - consumer_cart_abandon
+      - consumer_seasonal_outdoor

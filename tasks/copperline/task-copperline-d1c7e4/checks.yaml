@@ -1,0 +1,130 @@
+# MER-311 grades one thing: does the SKU page carry the order-level discount,
+# spread the way the world has already written down that it is spread?
+#
+# THE SEAM. `raw.orders.order_discount_cents` is a header promotion. The OMS
+# applies it to the order and never pushes it to a line, so
+# `raw.order_lines.line_total_cents` is the line before it and
+# `subtotal_cents` is the sum of the lines, exactly, on every order in the feed
+# (3,413,378 live orders, checked). Add the lines up by SKU and the page is high
+# by the header discounts: 12,848,977,962 cents against 449,382,777,688 of
+# subtotal, 2.86% across the whole feed and 2.85-2.86% in each of the four
+# channels. That is the buyer's "about three per cent".
+#
+# WHERE THE ALLOCATION RULE IS WRITTEN, which is what the checks measure
+# against. `dbt/copperline_analytics/models/shared/intermediate/
+# int_order_lines_discounted.sql`, in the model's own header:
+#
+#     * Pro rata by tax-exclusive line total.
+#     * Integer cents throughout, largest remainder.
+#     * An order whose lines sum to zero gets no allocation.
+#
+# It is the only statement of the method in the world. `docs/finance-policy.md`
+# REV-13 is promotion STACKING — the order the four discount kinds apply in,
+# per line — and says nothing about spreading a header discount, and there is no
+# promotions policy document. `docs/semantic-definitions.md` reaches the model
+# from the other end: `net_sales_cents` is an order-line name defined as gross
+# less REV-13 discounts and returns, and `int_net_sales_lines` computes it out
+# of `int_order_lines_discounted`. The same page's warning that "a model that
+# splits [booked_cents] across lines has invented an allocation nobody agreed"
+# is about `booked_cents` and not about the discount; an agent that reads it as
+# forbidding this allocation lands on the buyers' own answer and fails the tie.
+#
+# THE POPULATION IS SETTLED IN THE TICKET, and has to be. PLANTED.md records
+# that this tree disagrees with itself on soft-deleted orders: `enrich_base`
+# keeps them and cites `docs/reconciliation-policy.md` R-6, while the dbt view
+# `stg_sales__orders` drops them in the same `where` that drops the test rows.
+# R-6 is a clause about reconciliation OUTPUT and says nothing about a sales
+# page, but a task that grades an order population without naming one is
+# grading a coin flip. MER-311 names `stg_sales__orders`, so the two filters
+# are the agent's to find and read, not to guess.
+#
+# NO AUTHORED VALUES. The verifier computes every expected result from
+# `raw.orders` and `raw.order_lines` in the same session, applying that model's
+# arithmetic spelled the same way. The only figures typed anywhere in this task
+# are in this comment, and each one is a measurement of the shipped world.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no module        verifier: import fails
+#   the lines summed, no allocation                   verifier: the day tie, and
+#     (the buyers' own spreadsheet)                   2,159 SKU rows on 09 April
+#   allocated, but rounded per line and not by        verifier: the exact day
+#     largest remainder                               totals — measured +6, -23
+#                                                     and -27 cents on the three
+#                                                     graded days
+#   spread equally over the lines                     verifier: 2,331 SKU rows on
+#                                                     09 April, up to 98,880
+#                                                     cents on one row
+#   spread pro rata by quantity                       verifier: 2,330 SKU rows,
+#                                                     up to 86,497 cents
+#   test orders or deleted orders left in             verifier: every column's
+#                                                     day total; the three days
+#                                                     carry 38/14, 20/7 and 23/7
+#   cancelled orders dropped                          verifier: same. The view
+#                                                     drops two things and that
+#                                                     is not one of them
+#   `line_discount_cents` taken off again             verifier: gross_line_cents,
+#     (it is already inside line_total_cents)         exact, on the 1,016,948
+#                                                     orders that carry one
+#   the page built for the buyers' week only          verifier: 2026-02-17 and
+#                                                     2026-05-19
+#   a bare INSERT, or CREATE OR REPLACE TABLE         verifier: the rebuild test
+#                                                     and the other-day test
+#   `raw.orders` read unqualified                     verifier: the frozen `nwv`
+#                                                     copy carries the same name
+#                                                     and stops in Sept 2025, so
+#                                                     the day comes back empty
+#   the note written without finding the rule         file_contains
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES, and it should. Spreading pro rata by
+# `qty * unit_price_cents` rather than by `line_total_cents` gives the identical
+# answer on every graded day, because no order in this world carries a header
+# discount and a line discount at the same time (752,148 orders have one,
+# 1,016,948 have the other, none have both). The two bases cannot be told apart
+# here, so the checks do not try to.
+#
+# THE TIE-BREAK IS NOT GRADED. Largest remainder has to break a tie when two
+# lines of one order hold the same fraction. The shared model breaks it by line
+# total and then by line number; another order is defensible and moves at most
+# one cent between two SKUs of the same order — measured at 12 to 44 SKU rows a
+# day, never more than a cent each, never moving a day total. So the three money
+# columns are compared per SKU within a cent and exactly in total, and
+# `test_no_graded_number_turns_on_the_tie_break` measures that bound each run
+# rather than assuming it.
+#
+# The graded days are 2026-04-09, 2026-02-17 and 2026-05-19. The ticket names a
+# week and none of the three by name. All three sit outside the reserved windows
+# (2026-06-01..09 and 2025-08-31..2025-10-04) and outside the never-grade tail.
+#
+# Nothing here replays a DAG. The ticket asks for the figure and says the
+# wiring is MER-312, so there is no DAG to run and no partition to wait for.
+replay: []
+
+checks:
+
+# The substance. See verifier/test_outputs.py — three days, the SKU set, every
+# column on every SKU, the day tie the ticket states, and two rebuild tests.
+# Nine tests, nine builds, and the order book's answer read once a day and
+# cached: 206 seconds against the shipped world on a loaded laptop.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900
+
+# The note the buyers asked for. Four things in five patterns, and each pattern
+# pins a named thing rather than a phrasing; matched case-insensitively with
+# re.search.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The column the page never had, named as the feed spells it.
+  - 'order_discount_cents'
+  # Where the rule lives. The model's name, or the path to it.
+  - 'int_order_lines_discounted'
+  # What the rule is: a proportional share, and whole cents by largest
+  # remainder rather than per-line rounding.
+  - '(pro.?rata|in proportion|proportional|share of)'
+  - '(largest.{0,12}remainder|biggest.{0,20}(fraction|remainder)|leftover cents)'
+  # What has to be true of every order: the shares add back to the order's own
+  # discount, exactly. This is the sentence that separates an agent who copied
+  # the method from one who understood why it is that method.
+  - '(add|sum|total|come|adds|sums|totals|comes)[^\n]{0,40}(back )?(up )?to[^\n]{0,60}(order.?level|header|order.s own|order_discount_cents|the order.?s discount|the order discount)|(exactly|to the cent|no cents (lost|invented)|without losing a cent)[^\n]{0,60}(every|each) order|(every|each) order[^\n]{0,80}(exactly|to the cent)'

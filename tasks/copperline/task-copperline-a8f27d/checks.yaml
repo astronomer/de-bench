@@ -1,0 +1,178 @@
+# `marts.tax_daily` adds two rollups that are largely the same money, joins one
+# of them on a key it fans out on, and drops the other one's blank-currency half
+# on the floor. The ticket asks for all three, in cents.
+#
+# THE OVERLAP. Every one of the 172,674 goods invoices carries an `order_id`,
+# resolves to exactly one row of `raw.orders`, and carries that order's own tax:
+# summed by invoice, `raw.invoice_lines.tax_cents` equals `raw.orders.tax_cents`
+# on all 172,674, to the cent, 18,400,194,743 cents in all. Every one of those
+# orders is a `trade` order and `invoice_date` is its `local_order_date`. So the
+# trade book's tax is on both sides of the mart's addition, on the same day, in
+# the same market.
+#
+# THE FAN-OUT. `order_tax` groups by day, market, CHANNEL and currency;
+# `invoice_tax` groups by day, market, ENTITY and currency; the join is on day,
+# market and currency alone. A market has exactly one entity, so the invoice
+# rollup contributes one row per join key and the order rollup contributes one
+# per channel trading — four on most days. So `sum(i.invoice_tax_cents)` counts
+# the day's invoice tax about four times over, and `sum(o.order_tax_cents)` is
+# not fanned out in return. Measured: the mart's invoice side is 45,886,667,047
+# against 11,580,190,981 of invoice tax that can join, and its own
+# `invoice_count` comes to 412,587 against 103,783 invoices.
+#
+# THE BLANK CURRENCY. `raw.invoices.currency_code` is NULL on 92,971 invoices,
+# the US and CA book from 2024-02-04 to 2025-04-06, and `fct_ar_invoices` passes
+# it through as `currency_key` unfilled. The `days` CTE unions those keys in,
+# because a UNION treats two NULLs as one key; the left join back never matches
+# them, because `NULL = NULL` is not true. So 6,846,249,989 cents of invoice tax
+# is in the model's output nowhere at all. It is the only thing holding the US
+# multiple down to 2.01 while ID, PL, MX and BR run at about 3.15.
+#
+# THE TWO NUMBERS. The model would publish 81,329,623,679 cents. The estate
+# charged 35,469,202,859 — 35,442,956,632 of order tax over the spine
+# `stg_sales__orders` draws, plus 26,246,227 on the 24,080 invoices that bill no
+# order. Every market is overstated, so nothing cancels and the group figure is
+# not flattered.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier re-derives the mart from the
+# model's own SQL over `raw.orders`, `raw.invoices` and `raw.invoice_lines` in
+# the same session, along with the honest figure, the overlap, the blank-currency
+# tax, the plan tax and the market table. Its first test asserts the eight facts
+# above against the world before it grades a word of the reply.
+#
+# COST. No DAG runs, no replays, no dbt. The verifier reads three landed tables
+# and one file, in about a second.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   add the order book and the invoice        the mart-total test. That is
+#     book and file it as the mart's          53,869,397,602, 34% below the
+#     number                                  figure, because it misses both the
+#                                             fan-out and the blank-currency drop
+#   find the double count, stop there,        the mart-total test again, and the
+#     and report the mart as order tax        blank-currency test. That reading
+#     plus the invoice tax that joins         gives 47,023,147,613, 42% low
+#   report the overlap as the size of         the mart-total and worst-market
+#     the error                               tests. 18,400,194,743 is 40% of
+#                                             the real gap
+#   take the honest figure as the order       the plan-invoice test. The order
+#     book alone                              tax alone is 0.07% from the honest
+#                                             figure and passes that test on
+#                                             purpose — the plan book is what it
+#                                             misses and 26,246,227 is what
+#                                             convicts it
+#   take the honest figure as the order       the honest-total test. That is
+#     book plus the whole invoice book        53,869,397,602 and 52% high
+#   read the order spine unfiltered           the honest-total test, at 0.61%
+#     (`is_test` and `deleted_at` left in)    against a 0.25% window. The ticket
+#                                             names the population in as many
+#                                             words. The mart total moves 0.30%
+#                                             and is convicted at the same window
+#   read the tables unqualified through       the frozen `nwv` copy sits first on
+#     the house library                       the search path and carries
+#                                             `raw.orders` (142,133 rows) and
+#                                             `raw.invoices` (114,031) under the
+#                                             same names, while `raw.invoice_
+#                                             lines` is not in it and falls
+#                                             through to the live book. The two
+#                                             sides then share no invoice id at
+#                                             all — the join is 0 rows — so the
+#                                             overlap comes out empty
+#   measure one month, one year or one        out by an order of magnitude on
+#     market and scale it up                  every test
+#   quote the multiple (2.29 times) and       the ticket asks for integer cents;
+#     not the cents                           every verifier figure is absent
+#   give the group figure and stop            the worst-market test
+#   fix the model instead of measuring        do_not_modify: `dbt/**` is a
+#     it                                      critical gate and the ticket says
+#                                             so in words
+#
+# DEFENSIBLE ALTERNATIVES THAT PASS, and are not convicted:
+#
+#   the invoice book whole rather than the goods half, as the overlap. The plan
+#   invoices are 0.14 per cent of it, inside the 0.5% window on that test. The
+#   plan-invoice test is where the distinction is graded, and it is graded on the
+#   plan figure itself rather than by refusing the rounder one here.
+#
+#   the honest figure as order tax alone, without the plan book. 0.07 per cent,
+#   inside the window. Same reasoning.
+#
+#   a market table with two columns rather than three. The worst-market test
+#   takes the two sides of the subtraction in place of the subtraction.
+#
+#   working in dollars rather than cents. Every money figure is read both ways.
+#
+#   building the mart with `dbt run --select +tax_daily` and reading the answer
+#   off the table instead of emulating the SQL. It lands the same figures — the
+#   emulation was checked against the model clause for clause — and looking at
+#   the thing is the better instinct anyway. `dbt/**` is shut against edits, not
+#   against builds; a build writes to the warehouse, not to the tree.
+replay: []
+
+checks:
+
+# The seven figures, against the world's own arithmetic. See
+# verifier/test_outputs.py: the mart total, the honest total, the overlap and
+# the invoices carrying it, the blank-currency tax, the plan tax and the worst
+# market, every one of them re-derived from raw.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 600
+
+# The working paper's claims. Patterns are matched case-insensitively with
+# re.search and are written loose on purpose: each pins a mechanism, a column
+# name or a direction, never a phrasing, and a table row satisfies them as
+# readily as a sentence.
+
+# Where the two books meet. The link is the `order_id` on the invoice, and the
+# finding is that the tax on the two sides is one charge rather than two. A
+# reply that says the mart "looks high" has not said why.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(order_id|\border id\b|bills? (one|an|the) order|the order it bills|one invoice[^\n]{0,40}one order|one order[^\n]{0,40}one invoice|invoice[^\n]{0,50}(bills|names|carries|resolves to|points to)[^\n]{0,30}order)'
+  - '(twice|double|both sides|again|already|same (money|tax|charge)|duplicat|overlap|second place|two places)'
+
+# The fan-out, and the column that causes it. The channel is in the order
+# rollup's grouping and not in the join, and that is the whole mechanism. The
+# reply this is aimed at is the one that finds the double count, calls the mart
+# twice the honest figure and stops; it cannot name the channel or the
+# multiplication, because it never looked at the grouping.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(channel)'
+  - '(fans?\b|fanned|fan-?out|multipli|four times|4 times|4x|counted four|counts it four|one row per channel|a row per channel|per channel|once for each channel|cross join|many-to-many|cartesian)'
+
+# The blank currency, and why it never joins. This is the direction that makes
+# the invoice side smaller, and it is the half a paper that only found the
+# double count cannot produce. Naming the currency column is not enough: the
+# reply has to say that the join does not match a NULL to a NULL.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(currency)'
+  - '(null|blank|missing|empty)'
+  - '(null\s*=\s*null|two nulls|nulls?[^\n]{0,80}(never|not|does ?n.?t|cannot|can.?t)[^\n]{0,40}(match|equal|join)|(never|does not|do not|cannot|can.?t|fails? to)[^\n]{0,60}(match|join|equal)[^\n]{0,60}null|reach(es)? no row|no row of the mart|joins? no row|never joins?|dropped entirely|nowhere at all)'
+
+# The plan invoices. They are the only invoice tax that is genuinely additive,
+# and the reason is that they bill no order. A reply that adds the invoice book
+# to the order book has not made the distinction; a reply that subtracts the
+# whole invoice book has thrown these away.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(plan invoice|plan book|plan line|plan-?only|line_kind)'
+  # \W{0,3} between the words: markdown backticks and the underscore in
+  # "carrying no `order_id`" defeated the plain-space spellings.
+  - '(no\W{0,3}order(_?id)?\b|nobody.{0,3}s order|not an order|order_id[^\n]{0,12}(is )?null|without an order|no matching order|carr(y|ies|ying)\W{0,3}no\W{0,3}order|bill no order|bills? no order|no order id)'
+
+# The direction, market by market. Every market is overstated here — unlike
+# TAX-241's flat rate, nothing cancels — and the ticket asks for the table and
+# for the worst market by name. A reply that gives one group figure fails here.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(over-?stat|over-?report|over-?count|too high|inflat|over the charge|more than we charged|above what we charged)'
+  - '(\bUS\b|United States)'
+  - '(\bGB\b|Britain|British|\bDE\b|German|\bIE\b|Ireland|Irish|\bCA\b|Canad|\bBR\b|Brazil|\bID\b|Indonesia|\bPL\b|Poland|\bMX\b|Mexic)'

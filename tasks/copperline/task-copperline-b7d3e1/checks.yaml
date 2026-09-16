@@ -1,0 +1,147 @@
+# RR-118 asks for a settlement window out of a landing tree dated by arrival.
+# That one sentence is the task. `landing/meridian/dt=<ds>/hr=<hh>/events.jsonl`
+# is what Meridian delivered in that hour — `payments_intake`'s docstring says
+# so in as many words — and the live tree keeps the 90 days RET-1 allows, so it
+# starts at `dt=2026-03-17`. The requested settlement window opens six weeks
+# before that and the tree still holds part of it, because an event settled in
+# February can be delivered in April. Nothing about that is visible in a
+# directory listing, and everything about it is visible in the rows.
+#
+# Nothing here holds an authored value. The verifier computes every expected
+# result from the landing files in the same session, so the task grades the same
+# at either generator profile. The figures below are the full-profile ones and
+# are quoted to show what separates the readings, not to be compared against.
+#
+#   the landing tree, settlement date inside the window   75,067   correct
+#   the whole tree, unfiltered                           486,282
+#   `raw.pay_meridian_settlements` over the window       318,039
+#   the tree, filtered on the `dt` directory as well      71,967
+#   one directory per settlement date, `dt` = settlement   1,697   the shape
+#                                                                 the restore
+#                                                                 shipped with
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code             dag_runs: the params
+#                                                        ship with no defaults,
+#                                                        so a plain trigger dies
+#                                                        before the first step
+#   the shipped per-day read kept (dt = the settlement    verifier: 1,697 of
+#     date, filtered to that date again)                  75,067 events
+#   the tree read but filtered on `dt` as well as on      verifier: 71,967 —
+#     `settlement_date`                                   the 3,100 events
+#                                                         delivered after March
+#                                                         are missing
+#   the whole tree written, unfiltered                    verifier: the window
+#                                                         test and the count
+#   rebuilt from `raw.pay_meridian_settlements`           verifier: 318,039 —
+#                                                         the archived days our
+#                                                         tables kept and the
+#                                                         landing copy did not
+#   rebuilt from `marts.fct_payments` or `int_payment_    verifier: order grain,
+#     matched` (what the shipped SQL named)               so the columns test
+#                                                         and the ids test both
+#                                                         go
+#   `select *` over the tree, hive columns and all        verifier: `dt` and
+#                                                         `hr` are our directory
+#                                                         names, not Meridian's
+#                                                         record
+#   the six gap days interpolated from their neighbours   verifier: the ids
+#     or lifted from a mart                               test, both directions
+#   `check_source_present` left raising on the first      dag_runs: red
+#     date with no directory of its own
+#   the shipped `CREATE SCHEMA IF NOT EXISTS ops` left     dag_runs: red. The
+#     unqualified                                         search path puts the
+#                                                         frozen `nwv` copy
+#                                                         first and it is
+#                                                         attached read-only,
+#                                                         so the create lands
+#                                                         on it and raises
+#   a step deleted to get the run green                   dag_structure
+#   the note says everything before 17 March is gone      file_contains: the
+#                                                         archive clause
+#   the note never names the six days with no copy        file_contains
+#
+# ONE ALTERNATIVE THAT PASSES, and should. An agent who reads
+# `raw.pay_meridian_settlements` and filters it to `loaded_at >= 2026-03-17`
+# lands the same 75,067 rows and passes the verifier. That is against the
+# ticket, which names the landing copy as the source — but it needs the same
+# finding to work at all (that the tree is dated by arrival, and where its edge
+# is), and a check that convicted it would also convict the honest thing of
+# querying our own tables to size the shortfall for the note. The count is the
+# conviction here; the source is stated in the ticket and left there.
+#
+# Nothing upstream has to run: `raw` and the landing tree both ship baked.
+replay: []
+
+checks:
+
+# The tree still imports and the restore path is still there.
+- kind: dag_parses
+  dag_id: fct_payments_restore
+
+# The four steps the restore was written with. Two of them are what a restore
+# is for — the one that says what the source can reach and the one that holds
+# the rebuild to it — and both fail on the tree as it ships. Deleting either is
+# the cheapest way to a green run and is not a restore.
+- kind: dag_structure
+  dag_id: fct_payments_restore
+  task_ids:
+  - check_source_present
+  - rebuild_days
+  - check_against_source
+  - record_restore
+  operators:
+    check_source_present: PythonOperator
+    rebuild_days: PythonOperator
+    check_against_source: PythonOperator
+    record_restore: PythonOperator
+
+# A plain trigger with no run configuration serves RR-118, as the ticket asks.
+# On the tree as it ships `start_date` and `end_date` have no default at all,
+# so this is also the check that the request was served rather than described.
+- kind: dag_runs
+  dag_id: fct_payments_restore
+
+# The substance. See verifier/test_outputs.py — the restored record against the
+# landing files themselves, in total, by event id both ways, and date by date.
+- kind: pytest_verifier
+  file: test_outputs.py
+
+# The note. Three separate decisions, one check each, so getting one right by
+# luck passes one. Patterns are matched case-insensitively with re.search and
+# are written loose on purpose: each pins a date or a named thing, never a
+# phrasing.
+
+# What is gone. The six days of files with no archive copy, named, and called
+# what they are. A note that lists a range without either end is not naming
+# them for legal.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(2026-02-09|\b9 february|february 9\b|feb\.? ?9\b)'
+  - '(2026-02-14|\b14 february|february 14\b|feb\.? ?14\b)'
+  - '(no (second )?archive|no archive copy|never (been )?archived|not archived|exists? nowhere|nowhere|do(es)? not exist|unrecoverab|irrecoverab|permanent|for good|forever|no copy|\bgone\b|\blost\b|destroyed|deleted)'
+
+# What is merely slow. The rest of the range left the live tree under RET-1 and
+# is in the archive, which is a restore job with a price, not a loss. This is
+# the check that convicts the over-refusal — the reply that reads the directory
+# listing, sees nothing before 17 March and writes February off.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(archiv[^\n]{0,200}(restore|recover|reload|retriev|available|still|held|only copy)|(restore|recover|retriev|reload)[^\n]{0,200}archiv)'
+  - '(hours?\b|working day|a day\b|overnight|slow|not a query|no query path|restore job)'
+  - '(2026-03-1[67]|1[67] march|march 1[67]|90[- ]day|90 days|ninety day)'
+
+# Why the tree reaches February at all. The finding the whole ticket turns on:
+# the files are dated by delivery and the request is in settlement dates, so
+# what is in the tree for a date has nothing to do with whether a directory of
+# that name exists. A reply that never says this cannot have arrived at the
+# right rows on purpose.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(arriv|deliver|loaded_at|load date|delivery date|when we (got|received))'
+  - '(late|tail|later|after[^\n]{0,40}settl|weeks after|days after)'
+  - '(dated by|partition|keyed|indexed|organis|organiz|by arrival|by delivery|not by settl|rather than[^\n]{0,60}settl|arriv[^\n]{0,80}not[^\n]{0,60}settl)'

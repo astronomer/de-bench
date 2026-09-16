@@ -1,0 +1,196 @@
+# The whole ticket is one question: when a return comes back through a door
+# that did not sell it, whose number moves?
+#
+# `raw.returns` carries `return_channel` — the door the goods came back through,
+# `mail`, `store` or `marketplace`. `raw.orders` carries `channel` — the channel
+# that took the sale, `store`, `web`, `marketplace` or `trade`. 14% of
+# authorisations come back through a door that did not sell them, so reading the
+# door as the selling channel moves one row in seven into another channel and
+# leaves the company total identical. That is why nobody in the world has caught
+# it, and it is the shape the spec arms the column for.
+#
+# The ticket states the contract once, in the column table: `channel` is the
+# channel that sold the line. It is the house's own rule, and the tree already
+# embodies it — `int_return_linked` takes the channel off the line, not off the
+# return. So a build that reads the door is convicted, and it is convicted
+# loudly: the two vocabularies do not line up, so a door-attributed table
+# carries a `mail` row and carries no `web` or `trade` row at all. The verifier's
+# first test asserts that disagreement still holds before it grades anything.
+#
+# The door is not junk, and the ticket does not treat it as junk. It has exactly
+# one job — `counter_credit_cents`, the store credit handed over a counter,
+# whichever channel sold the goods. That is the number the ticket's own argument
+# is about, and it is what a store's reconciliation shows against somebody
+# else's sale. So the agent has both columns in hand and has to give each one
+# its own job.
+#
+# The trap under it is the join. `order_line_id` is a line ordinal — twelve
+# distinct values over nine million lines — and the staging layer says so twice,
+# on the source in `_sources.yml` and again on `stg_sales__returns`, while
+# `raw.order_lines` carries the pair as its primary key. Four statements in
+# `projects/commerce/sql/` join on the ordinal anyway (`close_line_economics`,
+# `close_apply_promotions`, `economics_lines`, `returns_orphan_check`). Copying
+# the house SQL is the wrong move here and reading the staging layer is the
+# right one.
+#
+# The population is the third thing. `NOT is_test` is unanimous in the tree —
+# `enrich_base`, `economics_tie`, `close_revenue_tie`, `channel_load_market` and
+# `stg_sales__orders` all take it that way — so the ticket does not state it and
+# finding it is part of the work.
+#
+# The soft deletes ARE stated, and they are stated because the tree disagrees
+# with itself about them: `enrich_base` keeps them and cites
+# `docs/reconciliation-policy.md` R-6, and the dbt view `stg_sales__orders`
+# drops them in the same breath as the test rows. An agent that reads the
+# staging layer and an agent that reads commerce's own SQL would land on
+# opposite answers, and neither would deserve to lose. So the ticket names R-6
+# and the disagreement is left as furniture.
+#
+# WHAT THIS TASK DOES NOT GRADE, and why. RTN-266 (task-copperline-c8f42d)
+# grades the REACH: a night of authorisations names order days spread over two
+# months, and the run has to find them. This ticket hands the run its order day
+# and asks it to rebuild that day whole, so there is no window to get wrong and
+# no second grading of the same question. The two compose — sum this table over
+# its channels and it is RTN-266's table — and neither convicts the other's
+# subject.
+#
+# Nothing here holds an authored value. The verifier computes both attributions
+# and every wrong population from `raw.returns`, `raw.orders` and
+# `raw.order_lines` in the same session. Its first test proves the graded days
+# can still tell them apart.
+#
+# WHY NOTHING RUNS THE DAG. The subject is what a run of order days leaves
+# behind. Twelve scheduler runs to grade one query buys nothing the direct call
+# does not, and it costs a scheduler. The verifier calls
+# `returns_channel.build_day(ds)` itself, which also removes the shortcut: a day
+# typed into the table by hand is a day the replay replaces before anything
+# reads it.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered                        verifier: the import fails
+#   the channel taken off the RETURN —       verifier: the replay test. Every
+#     `return_channel`, the door               graded day moves. The table grows
+#                                              a `mail` row the order book never
+#                                              sold through and loses `web` and
+#                                              `trade` entirely
+#   the channel taken off the return only    verifier: the replay test, the same
+#     when the two disagree, or coalesced      way. The ticket asks for one
+#     across the two                           channel and it is the seller's
+#   `counter_credit_cents` summing every     verifier: the replay test. The
+#     refund that came back over a counter,    column is about fourteen times too
+#     not just the store-credit part           big on every row
+#   `counter_credit_cents` read as the       verifier: the replay test. It
+#     STORE channel's store credit rather      becomes `store_credit_cents` on
+#     than the till's share                    the store row and zero on the
+#                                              other three, which is the reading
+#                                              the ticket's own
+#                                              `counter_credit_cents` bullet
+#                                              exists to rule out
+#   `card_refund_cents` or                   verifier: the replay test. Every
+#     `store_credit_cents` summing every       graded row moves
+#     refund method
+#   the line joined on `order_line_id`       verifier: the replay test.
+#     alone, the way four commerce             `returned_line_cents` becomes
+#     statements do                            every order that ever had a line
+#                                              in that position. Measured on the
+#                                              same feed by RTN-266: the join
+#                                              fans a day's authorisations across
+#                                              nine million lines, so it may
+#                                              exhaust the check's clock rather
+#                                              than return a wrong number
+#   the row put on the day the               verifier: the replay test. Every
+#     authorisation was raised —               graded day holds the wrong
+#     what `returns_publish.sql` does          authorisations. An RMA is raised
+#                                              at least three days after its
+#                                              order, so a build that asks for
+#                                              both dates at once writes almost
+#                                              nothing
+#   the row put on the day the goods         verifier: the replay test, the
+#     came back                               same way
+#   the staff transactions left in           verifier: the replay test
+#   the soft-deleted orders dropped, the     verifier: the replay test. The
+#     way the dbt staging view drops them     ticket states R-6 for exactly this
+#                                             reason — see the note above
+#   the channels restricted to the three     verifier: the replay test. The
+#     the reports usually name, the way       `trade` rows are missing.
+#     `tie_channel_mix_daily_channel_        `dim_channel` and the intermediate
+#     coverage` does                          schema both list four, and
+#                                             `channel_load_market` groups on the
+#                                             column without an IN-list
+#   a row of zeros for a day and channel     verifier: the replay test. The
+#     with no authorisations                  ticket says such a row is not
+#                                             written
+#   the rows appended rather than the        verifier: the replay test and the
+#     day replaced                            re-run test — the day carries two
+#                                             rows for a channel
+#   the whole table rebuilt every run        verifier: the untouched-day test.
+#                                             The ticket forbids it and
+#                                             `projects/platform/README.md` says
+#                                             why
+#   days corrected by hand in the table      verifier: it builds the days itself
+#                                             first
+#   the DAG or the module broken             dag_parses
+#   the two steps collapsed into one         dag_structure
+#
+# WHAT IS NOT CONVICTED, on purpose:
+#
+#   * A build that carries extra columns beyond the nine the ticket lists. The
+#     verifier selects the nine by name, and plants its untouched-day row by
+#     copying one the build wrote, so a wider table is planted into as happily
+#     as a narrow one.
+#   * A build that rebuilds neighbouring order days as well as the one it was
+#     given — a trailing window against the feed's own reach, say. It is more
+#     work than the ticket asks for, but every day it touches it rebuilds whole
+#     and correctly, and the planted row sits five months before the graded
+#     days, out of any sane window's way. Only a rebuild of the whole table is
+#     convicted.
+#   * What `build_day` returns. The ticket asks for the number of rows written;
+#     nothing here reads the return value, because a build that counts rows one
+#     way and writes them another is still a build that wrote the right rows.
+#   * Whether `tie_day` runs at all. `dag_structure` requires the step, and the
+#     ticket says what it is for; nothing here executes it.
+#   * Which day the DAG hands to `build_day`. `CONVENTIONS.md` holds a daily job
+#     back one day and the solution does, but a run that takes `{{ ds }}` is
+#     loading the same table by the same rule, and nothing here looks at
+#     `op_kwargs`. The whole point of the ticket is that the run is TOLD its
+#     order day.
+#   * Extra steps in the DAG. `dag_structure` names the two the ticket asks for;
+#     a sensor in front of them is a reasonable thing to add.
+#   * A build that writes a staging table of its own on the way, or publishes
+#     the day as a partition file beside the table. Nothing here looks at
+#     either.
+#   * The order rows sit in within a day. The verifier sorts both sides.
+#
+# The order days built are 2025-11-10 to 2025-11-21 and the ticket names none of
+# them and no date at all. They sit after the UTC cutover of 2025-11-03 and
+# before the Black Friday spike of 2025-11-28, outside both reserved ranges,
+# outside the 2025 processor overlap quarter and outside FY2026-P04, which the
+# close task grades. They do not overlap RTN-266's graded span either, so the
+# two tasks share a seam and no dates.
+replay: []
+
+checks:
+
+# The new DAG renders and the bag still has no import errors.
+- kind: dag_parses
+  dag_id: returns_channel_daily
+
+# The two steps the ticket asks for, as operators. `tie_day` exists to make a
+# channel that went missing loud in the DAG's own log rather than in a
+# reconciliation meeting a month later; folding it into the build removes the
+# only thing that would catch a `mail` row at all.
+- kind: dag_structure
+  dag_id: returns_channel_daily
+  task_ids:
+  - build_day
+  - tie_day
+  operators:
+    build_day: PythonOperator
+    tie_day: PythonOperator
+
+# The substance. See verifier/test_outputs.py — twelve order days built, both
+# attributions computed from the raw feed, a re-run, and a day no run was given.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

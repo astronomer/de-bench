@@ -1,0 +1,4 @@
+FROM quay.io/astronomer/astro-runtime:12.7.1
+
+ENV AIRFLOW__CORE__ENABLE_XCOM_PICKLING=True
+ENV AIRFLOW__WEBSERVER__RBAC=True

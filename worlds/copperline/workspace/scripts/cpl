@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""cpl — the team's kitchen-sink CLI. The two subcommands people actually use:
+
+    cpl api <endpoint> [--page-token T]   one page of a partner API, as JSON
+    cpl snapshot                          refresh the read-only warehouse copy
+
+`cpl api` returns ONE page. Every listing pages at 50 with a
+`next_page_token`, `total` is always null, and the last page is the one with
+no token — so a loop that stops at the first page has an answer that looks
+complete and is not. include/lib/loaders.py's JsonApiToWarehouseOperator is
+the loop done right; this command exists for poking at a single page by hand.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(prog="cpl")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    api = sub.add_parser("api", help="fetch one page of a partner API")
+    api.add_argument("endpoint")
+    api.add_argument("--page-token", default=None)
+    sub.add_parser("snapshot", help="refresh the read-only warehouse snapshot")
+    args = p.parse_args()
+
+    if args.cmd == "snapshot":
+        script = Path(__file__).parent / "warehouse_snapshot.sh"
+        return subprocess.call(["sh", str(script)])
+
+    base = os.environ.get("CPL_API_BASE")
+    if not base:
+        print("set CPL_API_BASE (the DAGs get theirs from the connection; "
+              "a shell has to say)", file=sys.stderr)
+        return 2
+    url = f"{base.rstrip('/')}/{args.endpoint.lstrip('/')}"
+    if args.page_token:
+        url += "?" + urllib.parse.urlencode({"page_token": args.page_token})
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        page = json.load(resp)
+    json.dump(page, sys.stdout, indent=2, default=str)
+    print()
+    if page.get("next_page_token"):
+        print(f"# more pages: --page-token {page['next_page_token']}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

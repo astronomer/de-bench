@@ -1,0 +1,124 @@
+# PRO-1140 grades two things: does the new page carry what the promotion feed
+# says the promotions took, and did the agent find why the old one is short.
+#
+# THE SEAM. `marts.dim_promotion.discount_cents` and
+# `agg_promo_performance.discount_cents` are the world's only "what did this
+# promotion cost" figures, and both take it from `int_promo_exposure`. That
+# model's `eligible` CTE is an INNER join of the register to the orders each
+# promotion says it covers — inside `starts_on`..`ends_on`, in
+# `market_code_list`, at or above `min_order_cents` — and the applications are
+# then LEFT joined onto that. An application whose (order, promotion) pair is
+# not on the join never reaches the model, and neither do its cents. Over the
+# whole feed that is 1,720,182,976 cents of 19,736,595,750 — 8.7%, measured on
+# the shipped warehouse over the population `stg_sales__orders` publishes. The
+# model's own header is honest about the other direction (`sku_list` and
+# `category` promotions have a ceiling for an eligible side, which is what
+# `eligibility_is_complete` says) and says nothing about this one, and
+# `dim_promotion`'s header claims the column tells a promotion that ran from
+# one that was set up and never fired.
+#
+# WHY THE FEED IS THE ANSWER. `raw.promo_applications` restates money and never
+# adds any. A row with no `order_line_id` carries the whole of the order's
+# `order_discount_cents`; a row with one carries that line's
+# `line_discount_cents`, to the cent, on all 1,322,609 line rows. So the day's
+# applications add up to the day's order-level discounts plus its line-level
+# discounts exactly, on every day tested — which is the tie the ticket states
+# and the reason the page can be checked without trusting the model that built
+# it. No order in the feed carries both a header row and a line row.
+#
+# NO AUTHORED VALUES. The verifier computes every expected result from
+# `raw.promo_applications`, `raw.promotions`, `raw.orders` and
+# `raw.order_lines` in the same session. The only figures typed anywhere in
+# this task are in this comment, and each one is a measurement of the shipped
+# world.
+#
+# THE GRADED DAYS are 2026-05-12, 2026-03-17 and 2025-11-19. The ticket names
+# no date at all — "the last year" and "the 6th" — so there is nothing to
+# special-case. All three sit inside the order range and away from its tail,
+# and 2025-11-19 is seven months back, well before the fortnight anybody
+# reading the ticket would reach for. The verifier's first test proves each day
+# still separates the feed's answer from both wrong readings.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no module        verifier: the import
+#   the page built off `int_promo_exposure` or        verifier: all three days.
+#     `dim_promotion` (the number they already have)  Measured 946,753 / 470,778
+#                                                     / 150,673 cents short on
+#                                                     the three days
+#   the eligibility conditions copied out of          verifier: same
+#     `int_promo_exposure` into the new page
+#   `raw.orders` read without the two filters         verifier: all three days,
+#     `stg_sales__orders` applies                     which the ticket names
+#   `count(*)` written under the `orders` name        verifier: 16 of 18, 9 of 9
+#                                                     and 14 of 14 rows move
+#   the header rows dropped as "not on a line"        verifier: header_cents,
+#                                                     and the day tie
+#   the applications added to `order_discount_cents`  verifier: the day tie.
+#     or to `line_discount_cents` (the double count)  The feed restates those
+#                                                     columns, it does not add
+#                                                     to them
+#   `raw.orders` read unqualified                     verifier: the frozen `nwv`
+#                                                     copy carries the same name
+#                                                     and stops in Sept 2025, so
+#                                                     all three days come back
+#                                                     empty
+#   a bare INSERT, or CREATE OR REPLACE TABLE         verifier: the rebuild test
+#                                                     and the second-day test
+#   the row count not returned                        verifier: the last test.
+#                                                     The ticket asks for it
+#   the shared dbt models edited instead              do_not_modify: dbt/**
+#   a note that says only "the page is short"         file_contains: the model,
+#                                                     the mechanism and the
+#                                                     direction
+#
+# TWO DEFENSIBLE ALTERNATIVES THAT PASS, and should.
+#
+#   * The page built from the `landing/oms/dt=<ds>/promo_applications.csv`
+#     files rather than from `raw.promo_applications`. The ticket says "the
+#     promotion feed the OMS sends" and both are it; what the verifier grades
+#     is the rows, not the route. The landing tree holds RET-2's 400 days, so
+#     all three graded days are in it.
+#   * A note that also says the exposure model is right for take-up and wrong
+#     only for cost. That is the fuller reading and the ticket does not ask for
+#     it, but it contains everything the patterns below look for.
+#
+# ONE THING DELIBERATELY NOT GRADED. `raw.promotions.funded_by` says a quarter
+# of these promotions were paid for by the supplier, and a reader could argue a
+# vendor-funded discount never cost Copperline anything. No shipped document
+# says so — `funded_by` appears in three dbt models and in no policy — so the
+# ticket asks for what the promotions took off our orders and says nothing
+# about who paid, and the verifier grades the whole feed. An agent that splits
+# the funding out into extra columns still passes; one that filters vendor-
+# funded promotions out of the page fails the day tie, which the ticket states.
+replay: []
+
+checks:
+
+# The substance. See verifier/test_outputs.py — three days the ticket never
+# reaches, the two rules it states, the grain, and two ways of proving the
+# build owns its day rather than the table.
+- kind: pytest_verifier
+  file: test_outputs.py
+
+# The three lines the review pack asked for. Patterns are matched
+# case-insensitively with re.search and are written loose on purpose — each
+# pins a named thing or a direction, never a phrasing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The model the short number comes through. Naming the dimension or the
+  # growth aggregate instead is the same finding one hop later, so all three
+  # names count.
+  - '(int_promo_exposure|dim_promotion|agg_promo_performance|promo_exposure)'
+  # What it does that loses the money: it starts from eligibility.
+  - '(eligib|eligible|window|market|min_order|minimum)'
+  # That the losing is a join or a filter, rather than a rounding or a window
+  # of days. This is the half that separates "the number is short" from
+  # knowing why.
+  - '(join|filter|drop|exclud|discard|lost|loses|never reach|left out|restrict)'
+  # Which way it is wrong, and that the money is real. A reply that hedges on
+  # whether the dropped cents count fails here, and it should: the review is a
+  # supplier meeting.
+  - '(short|under|understat|too low|low by|misses|missing)'
+  - '(real|really|actually|did go|went out|we gave|was given|genuine|recorded)'

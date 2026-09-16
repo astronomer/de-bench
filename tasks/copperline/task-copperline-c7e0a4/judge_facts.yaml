@@ -1,0 +1,206 @@
+# The judge's answer key for this task's RESPONSE.md prose checks — what each
+# check requires, as plain facts. Generated from the regex patterns and rubric
+# comments in checks.yaml, calibrated against the solution, and reviewed; the
+# patterns in checks.yaml remain as provenance. Grading semantics: a check
+# passes only if the answer states at least one fact from EVERY group; stating
+# anything in `convicts` fails the check outright. `seq` is the check's
+# ordinal among this task's file_contains checks on RESPONSE.md, in file
+# order — the same order score.json labels them.
+checks:
+- seq: 0
+  background: 'The direction, and the line it comes from. A write-up that says which file
+    it
+
+    changed without saying why that file was the wrong one has recorded a keystroke
+
+    rather than a decision. Only the two governing citations count: the schema''s
+
+    own `source_of_truth` key, or the §AL-3 clause that says the same thing in
+
+    prose. §CON-1 does not count: the ticket prints that citation itself, and a
+
+    second audit found the agent it had been added for never read the rule — it
+
+    graded each table on its own evidence and repaired four of the five uncovered
+
+    subjects in the opposite direction from the file the rule crowns.'
+  groups:
+  - any_of:
+    - The write-up identifies config/alerts.yml as the authoritative side of the mismatch
+      — the file whose values stand — so that the disagreeing copy is what gets corrected.
+    - The write-up states that config/alerts.yml is where an alert's table, check, threshold
+      and owner are defined, and treats the other file as the stale copy.
+    - The write-up names config/alerts.yml as the file whose content wins the conflict, and
+      explains that the schema/contract file was therefore the one edited for the owner and
+      check-kind mismatches.
+  - any_of:
+    - 'The write-up cites the schema''s source_of_truth key (e.g. contracts/alert_subjects.yml
+      declaring source_of_truth: config/alerts.yml) as the reason the config wins.'
+    - The write-up cites §AL-3 of contracts/alerting.md as the rule establishing that the
+      config defines the alert, and uses it to justify the direction of the fix.
+    - The write-up grounds the direction of the repair in either the source_of_truth declaration
+      or §AL-3, quoting or paraphrasing the governing clause.
+  convicts:
+  - The write-up justifies the direction of the fix by citing §CON-1 (rather than source_of_truth
+    or §AL-3).
+  - The write-up changes config/alerts.yml to match the schema for the disputed owner or check-kind
+    rows, i.e. treats the schema as authoritative over the config.
+  - The write-up names which file it edited without giving any rule or citation explaining
+    why the other file was the wrong one to edit.
+  - The write-up states or implies that contracts/alert_subjects.yml is the source of truth
+    over config/alerts.yml.
+- seq: 1
+  background: 'The three orphaned subjects, and where the successor came from. Naming growth
+
+    is half of it; the other half is the evidence, because growth is also the
+
+    guess an agent makes from the `gro_` prefix without opening anything.'
+  groups:
+  - any_of:
+    - Identifies raw.email_events as one of the orphaned subjects (a source table with no
+      owning model/team)
+    - Mentions raw.email_events among the three orphaned subject areas
+  - any_of:
+    - Identifies marts.audience_segments as one of the orphaned subjects
+    - Mentions marts.audience_segments among the three orphaned subject areas
+  - any_of:
+    - Identifies raw.seo_rankings as one of the orphaned subjects
+    - Mentions raw.seo_rankings among the three orphaned subject areas
+  - any_of:
+    - Names 'growth' as the successor team/owner that took over the orphaned subjects
+    - States the successor is the growth team (e.g., the Growth squad/org)
+  - any_of:
+    - Cites gro_email_engagement_daily as evidence of the growth successor
+    - Cites gro_seo_rank_intake as evidence of the growth successor
+    - Cites the models/growth directory as evidence of the growth successor
+    - Cites the report-registry as evidence of the growth successor
+    - Notes the gro_ prefix is a guessable hint but backs it with concrete evidence such as
+      models/growth or the report-registry
+  convicts:
+  - Claims the orphaned subjects have no successor owner at all
+  - Attributes the orphaned subjects to a team other than growth (e.g., marketing, analytics,
+    data platform) as the successor
+  - States the growth ownership is only an inference from the gro_ prefix with no supporting
+    evidence in the repo
+  - Lists fewer than three orphaned subjects or substitutes a different table for one of raw.email_events,
+    marts.audience_segments, raw.seo_rankings
+- seq: 2
+  background: '`marts.gmv_daily`, the one row where the two files name different teams for
+
+    the same page. The verifier grades the end state; this grades that the
+
+    disagreement was noticed and settled rather than overwritten in passing.'
+  groups:
+  - any_of:
+    - The answer identifies `marts.gmv_daily` as the row where the two files disagree.
+    - The answer names `marts.gmv_daily` as the conflicting entry between the two sources.
+    - The answer flags `marts.gmv_daily` as the single page with two different owning teams.
+  - any_of:
+    - The answer states that one file assigns `marts.gmv_daily` to the commerce team while
+      the other names a different team.
+    - The answer resolves the `marts.gmv_daily` ownership conflict in favor of (or against)
+      the commerce team, explaining the choice.
+    - The answer discusses the commerce team's claim to `marts.gmv_daily` as part of settling
+      the disagreement.
+  convicts:
+  - The answer silently overwrites the `marts.gmv_daily` owner without noting that the two
+    files disagreed.
+  - The answer claims the two files agree on ownership for every page, including `marts.gmv_daily`.
+  - The answer says no conflicts or discrepancies were found between the two files.
+- seq: 3
+  background: 'The question the ticket opens with, and the hardest thing here to find. The
+
+    schema''s header claims an enforcement that has never existed:
+
+    `include/lib/contracts.py:181-182` returns "the contract names no model" and
+
+    `projects/platform/dags/plat_contracts_enforce.py:112-121` drops that result
+
+    before the failure count, naming `alert_subjects` as one of two it skips and
+
+    saying the list check belongs to the DAG that owns the document. For C-10 that
+
+    DAG is `gro_alerting_daily`, which only reports the subjects nobody owns. An
+
+    answer that says "nothing enforces it" without finding where it was supposed
+
+    to live has read one of the two files.'
+  groups:
+  - any_of:
+    - The answer identifies the enforcement DAG `plat_contracts_enforce.py` (projects/platform/dags/plat_contracts_enforce.py)
+      as the place that drops the contract-name/no-model result before counting failures,
+      explicitly skipping `alert_subjects`.
+    - The answer names `plat_contracts_enforce` as the contract-checking DAG that defers the
+      alert_subjects list check to the owning DAG.
+  - any_of:
+    - The answer names `gro_alerting_daily` as the DAG that owns the C-10 document and was
+      supposed to perform the list check, but only reports unowned subjects.
+    - The answer traces the deferred check to `gro_alerting_daily`, showing it merely reports
+      subjects nobody owns instead of enforcing the header's claim.
+  - any_of:
+    - The answer states that nothing actually enforces the header's claimed constraint — no
+      code performs the check / it is never enforced / the check is skipped and does not fail
+      anything.
+    - 'The answer concludes the enforcement does not exist: the result is dropped and no one
+      fails on it.'
+  convicts:
+  - The answer only says "nothing enforces it" without identifying where the enforcement was
+    supposed to live (neither plat_contracts_enforce nor gro_alerting_daily).
+  - The answer claims the constraint IS enforced by plat_contracts_enforce (or by any code)
+    and would cause a failure.
+  - The answer asserts `alert_subjects` is included in the failure count rather than skipped.
+  - The answer attributes ownership of the C-10 document to a DAG other than `gro_alerting_daily`.
+  - The answer claims include/lib/contracts.py fails or raises on the contract-names-no-model
+    result.
+- seq: 4
+  background: 'The five tables the schema names that nothing watches. They are not the ten
+
+    that went the other way and an answer that conflated the two directions cannot
+
+    list them. What happens to them in the file is not graded — see above — but a
+
+    reconciliation that leaves them unmentioned has dropped five promises in
+
+    silence.'
+  groups:
+  - any_of:
+    - The answer mentions raw.orders as one of the five tables that are declared in the schema
+      but never referenced/consumed by anything downstream.
+  - any_of:
+    - The answer mentions raw.pay_meridian_settlements as one of the five schema-declared
+      tables that nothing reads.
+  - any_of:
+    - The answer mentions raw.inventory_snapshots as one of the five schema-declared tables
+      that nothing reads.
+  - any_of:
+    - The answer mentions raw.carrier_invoices as one of the five schema-declared tables that
+      nothing reads.
+  - any_of:
+    - The answer mentions marts.daily_revenue as one of the five schema-declared tables that
+      nothing reads.
+  convicts:
+  - The answer conflates the two directions, presenting the schema-declared-but-unread tables
+    as if they were the same set as the ten tables referenced but not declared in the schema.
+  - The answer omits the set of schema-declared, never-referenced tables entirely from its
+    reconciliation, leaving those five promises unmentioned.
+  - The answer lists a set for the unwatched tables that is drawn from the opposite direction
+    (referenced-but-undeclared) rather than the schema-declared-but-unread tables.
+- seq: 5
+  background: 'The third copy of the list. The ticket says it exists and does not say where;
+
+    `docs/lineage.md` is one grep for `config/alerts.yml` away, and REG-2 at
+
+    `docs/report-registry.md:13` says its read set is the complete one.'
+  groups:
+  - any_of:
+    - The answer identifies docs/lineage.md as the location of the third copy of the list.
+    - The answer cites docs/lineage.md (e.g., via grep for config/alerts.yml) as where the
+      third copy lives.
+  - any_of:
+    - The answer names C-10 as the relevant entry/check.
+    - The answer refers to the data health check/report as the third copy's context.
+  convicts:
+  - The answer claims there is no third copy of the list, or that it could not be found.
+  - The answer says the ticket specifies where the third copy is located.
+  - The answer claims REG-2 (docs/report-registry.md:13) has an incomplete read set, or attributes
+    the complete read set to a different report.

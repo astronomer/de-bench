@@ -1,0 +1,138 @@
+# The ticket asks for three reserved names on one row, and the whole of the work
+# is which population each name covers. `docs/semantic-definitions.md` defines
+# all three, `docs/finance-policy.md` holds the clauses `recognized_cents`
+# composes, and `contracts/board-pack.md` §BP-2 holds the exclusion that makes
+# `reported_cents` a different number. The three differ by whole populations —
+# millions of cents — and never by pennies, which is what makes a near miss
+# convictable here.
+#
+# The six decisions the page is made of, and where each is written down:
+#
+#   booked is the order date, gross, and never moves      semantic-definitions,
+#     for what happened later                             and the ticket
+#   a line with no service period recognises in full      REV-1
+#     on the invoice date, not on the posted period
+#   a line with one is allocated by day, floor, with      REV-1, REV-2
+#     the remainder on the final day
+#   a legacy-era plan billed monthly lands whole in       REV-11
+#     the fiscal month its period starts in
+#   a refund inside 14 days reverses what the line had    REV-6
+#     recognised; after 14 days it stops the schedule
+#   a credit memo books on its own issue date             REV-5
+#
+# Nothing here holds an authored figure. The verifier computes every expected
+# result from `raw.orders`, `raw.invoices`, `raw.invoice_lines`,
+# `raw.plan_lines` and `raw.credit_memos` in the same session, walking the plan
+# book line by line in Python against the answer key's SQL so the two share no
+# code path. The answer key was checked a third way, repo-side, against
+# `tools/copperline_oracle` — an independent model of the same policy, written
+# for FIN-311: the two agree to the cent on the AR-book components of
+# FY2025-P10, FY2026-P02 and FY2026-P04. On FY2025-P11 they differ by 484
+# cents, which is REV-8's redirection of a late-arriving invoice; the ticket
+# excludes that redirection in as many words and the tolerance covers it either
+# way.
+#
+# WHY NOTHING RUNS A DAG. The ticket asks for no DAG, because the world's
+# finance marts are derived and none of them is on disk (`AGENTS.md`, "The
+# warehouse"): the two the close file is built from were never built at all.
+# The verifier calls `build_monthly` directly, which grades the same code in
+# seconds and removes the shortcut — a month typed into the table by hand is a
+# month the next build replaces.
+#
+# THE TOLERANCE. The verifier allows 20,000 cents on a figure. §REV-7 fixes the
+# currency conversion at one per row before allocation but names no rounding
+# mode, and the widest fork between defensible modes measures 8,815 cents on
+# these months. Every misreading below moves 32,170 cents at the least — the
+# refunds, in FY2026-P02 — and millions at the most, so the tolerance sits
+# above the noise and far below the signal. `test_the_graded_months_can_tell_the_readings_apart` re-measures both
+# ends every run, and fails rather than passing quietly if a world change ever
+# closed the gap.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered                          verifier: the import fails
+#   the goods book taken by `posted_period`    verifier: 64.2M cents in
+#     rather than the invoice date               FY2026-P02, and the same order
+#                                                of size in the other two
+#   every plan line cut to daily grain         verifier: `plan_cents` — 503,003
+#     (REV-11 read as a note rather than         cents in FY2026-P02
+#     a grain)
+#   every plan line booked whole on its        verifier: `plan_cents` — 393,873
+#     invoice date (no allocation at all)        cents in FY2026-P02
+#   the refunds ignored, a voided schedule     verifier: `plan_cents` — 165,001
+#     left running                               cents in FY2025-P10
+#   the credits taken by `applies_to_period`   verifier: `credit_cents` — the
+#     (which staging renames `fiscal_month`)     column staging offers is not
+#                                                the one REV-5 names; millions
+#   the credits netted into `recognized_cents` verifier: two columns move, and
+#     as well                                    the ticket says where they go
+#   the BP-2 exclusion read as "everything     verifier: `legacy_plan_cents` and
+#     on a legacy-era invoice", which is what    `reported_cents` — billions,
+#     `account_rollup.sql` does today            because most of the legacy-era
+#                                                book is goods
+#   `booked_cents` over every channel          verifier: 7.4bn cents
+#   `booked_cents` from `grand_total_cents`    verifier: 0.74bn cents
+#   the test and soft-deleted orders left in   verifier: 85M cents
+#   the cancelled orders taken out of booked   verifier: 0.96bn cents. The
+#                                                ticket says a cancellation does
+#                                                not un-book an order
+#   nothing converted to USD                   verifier: 243M cents on booked
+#   the page built per entity                  verifier: the month holds more
+#                                                than one row. The ticket fixes
+#                                                the grain
+#   the month appended rather than replaced    verifier: the rebuild test
+#   the table emptied before each build        verifier: the other-months test
+#   the three months corrected by hand         verifier: it runs the build first
+#   a page whose bridge does not add up        verifier: the bridge test
+#   the tree broken to get there               dag_parses
+#   a page and no reading of it                file_contains on RESPONSE.md
+#
+# WHAT IS NOT CONVICTED, on purpose:
+#
+#   * The rounding mode of the currency conversion. The ticket asks for half up
+#     and the tolerance covers a reply that truncates instead.
+#   * REV-8's redirection of a late-arriving row. The ticket excludes it; a
+#     reply that applies it anyway lands 484 cents away in FY2025-P11, which is
+#     inside the tolerance.
+#   * Extra columns beyond the seven. The verifier selects the seven by name.
+#     A month start or a row count beside them is a reasonable thing to carry.
+#   * Whether the remainder of REV-2 is paid on a schedule a refund cut short.
+#     It cannot be — the final day never arrives — but the amounts are cents
+#     and the tolerance covers either reading.
+#   * A DAG, if the reply writes one anyway. The ticket says the schedule comes
+#     later; nothing here looks for one.
+#
+# The graded months are FY2026-P02, FY2025-P10 and FY2025-P11. The ticket names
+# FY2026-P02 and FY2026-P03, so two of the three are months it never mentions.
+# None of them touches the world's reserved windows (2026-06-01..09 and
+# FY2025-P08, 2025-08-31..2025-10-04), and none is FIN-311's FY2026-P04.
+replay: []
+
+checks:
+
+# The tree still imports. The work is one new module under `projects/finance/`,
+# and this is the cheap guard that the finance package still loads: a DagBag
+# with an import error fails here whether or not the module itself is at fault.
+- kind: dag_parses
+  dag_id: fin_close_monthly
+
+# The substance. See verifier/test_outputs.py — three months, the seven
+# columns, the bridge, a rebuild and a build of a second month.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900
+
+# The two lines the meeting asked for. Patterns are matched case-insensitively
+# with re.search and are written loose on purpose: each pins a named thing,
+# never a phrasing, and none pins a figure — the figures are the verifier's
+# job.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The first of the two populations between the pack and the close.
+  - '\blegacy\b'
+  # The second. "credit memo", "credits", "credit note" all match.
+  - '\bcredit'
+  # The column a refund does not move, and the fact that it does not. A reply
+  # that lists three columns without saying which one holds still fails here.
+  - '(booked[^\n]{0,80}(never|not|un(changed|moved|touched)|no effect|stands|holds)|(never|not|nothing)[^\n]{0,60}booked)'

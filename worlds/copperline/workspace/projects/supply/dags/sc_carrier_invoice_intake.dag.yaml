@@ -1,0 +1,65 @@
+dag_id: sc_carrier_invoice_intake
+schedule: "0 3 * * *"
+description: carrier invoice CSVs into raw.carrier_invoices, one step per carrier
+default_args:
+  owner: supply
+  retries: 2
+tags: [supply, raw, intake, carriers]
+steps:
+  # One step per carrier, because the carriers deliver on their own schedules
+  # and a carrier that is late should not hold up the two that are not. Each
+  # carrier's file carries the periods still in retention, so each load replaces
+  # the invoice dates it brings rather than appending to them: the same file
+  # delivered twice leaves one copy.
+  land_brfr:
+    blueprint: csv_intake
+    source: carriers/brfr/invoices.csv
+    table: raw.carrier_invoices
+    mode: replace
+    partition_col: invoice_date
+    columns:
+      carrier_invoice_id: VARCHAR
+      carrier_code: VARCHAR
+      invoice_date: DATE
+      period_start: DATE
+      period_end: DATE
+      total_cents: BIGINT
+      status: VARCHAR
+  land_plpc:
+    blueprint: csv_intake
+    source: carriers/plpc/invoices.csv
+    table: raw.carrier_invoices
+    mode: replace
+    partition_col: invoice_date
+    columns:
+      carrier_invoice_id: VARCHAR
+      carrier_code: VARCHAR
+      invoice_date: DATE
+      period_start: DATE
+      period_end: DATE
+      total_cents: BIGINT
+      status: VARCHAR
+  land_mwlg:
+    blueprint: csv_intake
+    source: carriers/mwlg/invoices.csv
+    table: raw.carrier_invoices
+    mode: replace
+    partition_col: invoice_date
+    columns:
+      carrier_invoice_id: VARCHAR
+      carrier_code: VARCHAR
+      invoice_date: DATE
+      period_start: DATE
+      period_end: DATE
+      total_cents: BIGINT
+      status: VARCHAR
+  invoiced_by_carrier:
+    blueprint: rollup
+    depends_on: [land_brfr, land_plpc, land_mwlg]
+    source: raw.carrier_invoices
+    group_by: [carrier_code]
+    agg: sum
+    column: total_cents
+    as: invoiced_cents
+    target: marts.carrier_invoiced_daily
+    partition_col: invoice_date

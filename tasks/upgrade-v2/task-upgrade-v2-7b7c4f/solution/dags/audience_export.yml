@@ -1,0 +1,15 @@
+segment_export:
+  default_args:
+    start_date: 2024-06-01
+    owner: growth-team
+  schedule: '@hourly'
+  catchup: false
+  tasks:
+    build_segment:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo build_segment
+    push_segment:
+      operator: airflow.providers.http.operators.http.HttpOperator
+      endpoint: /v2/audiences/sync
+      http_conn_id: crm_api
+      dependencies: [build_segment]

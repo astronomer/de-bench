@@ -1,0 +1,225 @@
+# `join_product` has never finished. `enrich_product.sql` reads
+# `marts.dim_product` and two columns, `valid_from` and `valid_to`, that are on
+# no version of it — the dbt model keeps one row per SKU at today's record and
+# names neither column, and the model is not in the shipped warehouse at all.
+# That is the shipped world's, listed in `worlds/copperline/PLANTED.md` ("The
+# nightly close cannot run", last clause) and in BUILD-NOTES ("`marts.dim_product`
+# is built by nothing that can run"). Nothing is planted here and there is no
+# overlay.
+#
+# The ticket asks for two things: the statement rewritten off the change feed,
+# and four short answers in `RESPONSE.md` for the MER-612 review.
+#
+# NOTHING HERE IS AN AUTHORED FIGURE ON THE CODE SIDE. The verifier computes the
+# expected day from `raw.orders`, `raw.order_lines` and
+# `raw.pim_product_versions` in the same session that runs the step, so a tree
+# edit cannot move the answer. Its first three tests grade the world rather than
+# the answer: each graded day has to hold an order whose record has moved since,
+# a SKU the catalogue had retired by that date, and orders with no catalogued
+# line at all. If any of that stops being true the rulings grade nothing and
+# those fail first.
+#
+# THE FOUR FIGURES ON THE WRITTEN SIDE, and where each comes from. Measured on
+# the full-profile warehouse.
+#
+#   23,147   `select count(distinct sku) from raw.order_lines`
+#   1,860    `select count(distinct sku) from raw.pim_product_versions`
+#   1,724    the SKUs in both
+#   1,718    SKUs whose newest change is an upsert, so they carry an open row
+#   142      SKUs whose newest change is a delete: 1,860 less 1,718
+#
+# The first three do not move with the test-order filter — the same 23,147 and
+# the same 1,724 come out with or without it.
+#
+# COMPOSING WITH MER-612 (`task-copperline-3a206e`) AND CLS-208
+# (`task-copperline-c756fd`). The three tasks share one seam and none of them
+# grades another's surface. MER-612 builds the history and is graded on
+# `product_history_build.sql` and on `product_snapshot_daily`'s shape; CLS-208
+# is graded on the close's price book and its publish; this one is graded on
+# `staging.enrich_product` and on four lines of prose. `product_snapshot_daily.py`,
+# `snapshot_open_rows.sql` and `close_price_book.sql` are in `do_not_modify`
+# here and the ticket names all three as somebody else's. This task's verifier
+# needs none of them, so it gives the same verdict whether or not either has
+# landed. The written answer asks what `snapshot_open_rows.sql` will return once
+# MER-612's history is there, which is a figure about the feed rather than about
+# their statement.
+#
+# WHY NO DAG RUN. `AGENTS.md`, "The warehouse": the world ships the landed half,
+# so `staging.*` is not on disk, and `staging.orders_enriched` has no DDL
+# anywhere in the tree — `publish_enriched` stops on it whatever the agent
+# writes above it. `airflow dags test orders_enrich_daily` therefore cannot
+# finish on any date, so the verifier lays `staging.enrich_base` itself and
+# calls the patched `join_product` with the date the graph gives it. The ticket
+# tells the agent the same thing and says to drive the two steps by hand.
+#
+# What each wrong answer does:
+#
+#   nothing delivered
+#       the `delivered` gate. The untouched statement raises on the binder
+#       inside the fixture, and every test that reads it errors.
+#
+#   the product join made an inner join
+#       fails the coverage test on all three days. About four fifths of a day's
+#       orders have no catalogued line — 2,856 of 3,517 on the first graded day
+#       — and they leave the table altogether. Nothing in the DAG notices,
+#       which is the point of the second written answer.
+#
+#   the record taken as the one the SKU is on today rather than the one in
+#   force on the order date
+#       fails the category test on all three days: 55, 49 and 8 orders differ.
+#       This is the plausible wrong answer. The table looks right, ties to the
+#       order book on both counts, and answers every as-of question with
+#       today's catalogue.
+#
+#   the deletes filtered out before the ranking (the price book's spelling, and
+#   the natural way to write it)
+#       fails the category test on all three days: 8, 27 and 36 orders differ. A
+#       SKU the catalogue retired keeps colouring orders placed after it went.
+#       `close_price_book.sql` and `snap_product_price.sql` both filter
+#       `operation = 'upsert'` first, which is right for a price book and wrong
+#       here, and the ticket states the rule in as many words.
+#
+#   no rank at all, every version stamped on or before the date joined
+#       fails the line-and-unit test on all three days — 668, 711 and 708 orders
+#       carry an inflated `line_count` — and the category test with it.
+#
+#   `updated_at` compared as a stamp rather than as a date
+#       fails the category test on 2026-04-15, where three orders turn on a
+#       change made during the order day. It changes nothing on the other two
+#       graded days, which is why the middle day is in the set.
+#
+#   the statement given a second placeholder for the date
+#       fails the close test. `nightly_close.build_step` binds the date and
+#       nothing else, so a second `?` repairs this DAG and breaks the close. A
+#       repair that gives the statement two parameters AND teaches both callers
+#       to pass them PASSES, and should — the ticket asks that both callers
+#       still run it, not that the file keep one placeholder.
+#
+#   the columns renamed
+#       fails every substance test, which reads `line_count`, `unit_count` and
+#       `category_count` off the table. The ticket names all three: they are the
+#       contract with `enrich_publish`, which reads them by name.
+#
+#   the table appended rather than replaced
+#       fails the rerun test.
+#
+#   `enrich_base`, `enrich_publish` or `enrich_grain_check` edited to agree with
+#   a guess
+#       fails `do_not_modify`. `enrich_base` decides whose orders these are and
+#       `enrich_publish` is the reason a missing row is silent; both are the
+#       record the answers are read from.
+#
+#   `marts.dim_product` built here, or a history statement written alongside
+#       `dag_structure` — `orders_enrich_daily` keeps its eight steps, and the
+#       ticket says the history is MER-612's. A build folded into this one
+#       statement that still produces the right table PASSES, and should: the
+#       contract is the table, not the route to it.
+#
+#   another commerce DAG broken on the way past
+#       fails `dag_parses`, which asserts the whole DagBag has no import error.
+#       `nightly_close` reads the same statement file and is in the bag.
+#
+# WHAT IS NOT CONVICTED, on purpose. The same-day tie-break — `pim_ui`, then
+# `supplier_feed`, then `bulk_load` — separates no answer on this feed.
+# Ninety-six (SKU, date) pairs carry more than one change, and on every one of
+# the three graded days a build that ranks on the later stamp alone and never
+# looks at `source` produces the identical table: measured, 0 orders differ.
+# The rule is stated because the contract has to
+# state it and because a feed that stopped agreeing would need it, not because
+# it separates answers here. A build that ignores `source` passes, and that is
+# the right outcome.
+#
+# Cost: no DAG replays. The verifier lays the base and runs the statement four
+# times — three days, then the first day again — and drives the close's step
+# once. Everything else is a read on its own connection, and none of them goes
+# through `warehouse.connect(read_only=True)`, so no copy of the 2.7 GB
+# warehouse is ever made.
+replay: []
+
+checks:
+
+# The tree still imports and the DAG is still there. An import error here takes
+# the commerce package down with it, and `nightly_close` reads the same
+# statement file.
+- kind: dag_parses
+  dag_id: orders_enrich_daily
+
+# The DAG does not change shape. The ticket says the eight steps stay, and the
+# repair is one statement: a fix that hangs a history build here is doing
+# MER-612's ticket.
+- kind: dag_structure
+  dag_id: orders_enrich_daily
+  task_ids:
+  - build_base
+  - join_customer
+  - join_product
+  - join_channel
+  - join_tender
+  - joins_complete
+  - publish_enriched
+  - check_grain
+  operators:
+    join_product: PythonOperator
+    build_base: PythonOperator
+    check_grain: PythonOperator
+
+# The substance of the repair. See verifier/test_outputs.py — three guards on
+# the world, then the coverage and the grain, the two counts, and the categories
+# in force, over three order days; then a rerun; then the close's own step.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900
+
+# Answer 1, the coverage. 23,147 distinct SKUs in the order book against 1,860
+# in the change feed. An agent that counts the catalogue and never counts the
+# book has not answered the question, and one that counts the book off
+# `marts.dim_product` cannot count it at all.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b23[,\s]?147\b'
+  - '\b1[,\s]?860\b'
+
+# Answer 1's second half. 1,724 is the overlap, and it is the figure that turns
+# two populations into a coverage: it is smaller than the catalogue, so 136 SKUs
+# the PIM carries have never sold.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b1[,\s]?724\b'
+
+# Answer 2, and it is a verdict rather than a figure: `check_grain` would not
+# have caught it. The three names pin the mechanism — `enrich_publish` left-joins
+# this table onto the base, so the order still lands and the grain check still
+# ties — and the fourth pattern pins the verdict, because "yes, it would have
+# caught it" is wrong and has to be convicted. Patterns are matched with
+# re.search and case-insensitively, so they are written loose on purpose.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(check_grain|grain check|enrich_grain_check)'
+  - '(enrich_publish|publish_enriched)'
+  - 'left[\s_-]?(outer[\s_-]?)?join'
+  # The negation is bound to a catch-verb: a free-floating "not" inside the
+  # 220-character window let "would have caught it: the count is not equal" —
+  # the wrong verdict — satisfy this.
+  - '((check_grain|grain check|enrich_grain_check)[\s\S]{0,220}((would|will|could|can|does|did)\s?n.?t\s+(have\s+)?(caught|catch|notice|see|fire|flag|detect|stop)|(would|will|could|can|does|did) not (have )?(caught|catch|notice|see|fire|flag|detect|stop)|cannot (have )?(caught|catch|notice|see|fire|flag|detect|stop)|can.?not (have )?(caught|catch|notice|see|fire|flag|detect|stop)|never (catches|catch|fires?|notices?|sees?|flags?)|silent|blind|still (pass|passes|agree|agrees|tie|ties|green))|((would|will|could|can|does|did)\s?n.?t|(would|will|could|can|does|did) not|cannot|can.?not|never|silent|blind)[\s\S]{0,220}(check_grain|grain check|enrich_grain_check))'
+
+# Answer 3. The open-row count `snapshot_open_rows.sql` will come back with once
+# MER-612's history is there. 1,718 SKUs carry an open row; the number is the
+# feed's, not their statement's, so this grades the reading of the retirement
+# rule and not their build. The ticket asks for both of that statement's
+# figures and only this one is graded: the other is nought, and a bare `0` in a
+# page of prose cannot be matched for what it is.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(1[,\s]?718[\s\S]{0,120}(open|current|live|in force|carr)|(open|current|live|in force)[\s\S]{0,120}1[,\s]?718)'
+
+# Answer 4, which is what the 1,718 turns on: 142 SKUs whose newest change is a
+# delete. An agent that reads the feed as "newest row per SKU wins" and never
+# looks at `operation` gets 1,860 and cannot produce either figure.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(\b142\b[\s\S]{0,120}(retire|delete|remove|closed|withdraw|no open)|(retire|delete|remove|closed|withdraw|no open)[\s\S]{0,120}\b142\b)'

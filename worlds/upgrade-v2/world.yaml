@@ -1,0 +1,31 @@
+schema_version: 1
+name: upgrade-v2
+description: >
+  Airflow version-migration projects. Unlike lodestone there is no shared tree:
+  every task ships its own workspace/ (a small Airflow project pinned to an old
+  version or library) with an oracle solution/ beside it. This world supplies
+  only the system prompt and defaults.
+
+runtime:
+  # The whole system prompt. The trial cache keys on this text — changing even
+  # a byte retires every stored trial in this world. The per-task airflow_state
+  # paragraph is appended at run time (airflow_note defaults on).
+  system_prompt_text: |
+    You are a data engineer
+
+# Nothing to replay before grading: each project is self-contained and its DAGs
+# read no upstream tables.
+seed_defaults: []
+
+task_defaults:
+  # These projects are a handful of files; lodestone's half hour would be
+  # padding. Hard tasks may override in task.yaml.
+  #
+  # Raised 900 -> 1200 on 2026-09-07. The 2,418-trial sweep across 13 configs
+  # produced 7 genuine wall caps, all landing on 900.0s exactly, and 6 of the 7
+  # were one harness on claude-sonnet-5 at high thinking — a config whose extra
+  # reasoning time was being truncated by the cap rather than by the work
+  # running out. 1200 leaves that headroom while still being well short of
+  # lodestone's half hour.
+  max_wall_seconds: 1200
+  do_not_modify: []

@@ -1,0 +1,137 @@
+# Data table for the dag-factory 0.x → 1.0 migration primitives.
+#
+# `min_version` is the target floor: a project pinned below this fails
+# `dag_factory_pin_uplifted`. Everything else describes patterns that
+# the 1.0 release rejects (or silently strips).
+#
+# Adding a new breaking change is a YAML edit; only a new *detection
+# shape* (not just a new symbol) needs a new primitive. See
+# `docs/interpreting-results.md` for the category-level overview.
+
+# Pin floor. dag-factory 1.0.x is the post-migration line; 0.22.x is
+# the latest 0.x release that still ships the old API.
+min_version: "1.0.0"
+
+# Loader-side breaks. These are AST-detected against `.py` files
+# under the project's `dags/` and sibling packages.
+loader:
+  # Class made private in 1.0 (PR #509). Public API is now the
+  # `load_yaml_dags` function. Either an import of `DagFactory` or a
+  # call to it fails the metric.
+  forbidden_class: "DagFactory"
+  # Method on the (now-private) class. Even `_DagFactory(...).generate_dags(...)`
+  # is wrong — the loader contract is one function call.
+  forbidden_methods: ["generate_dags", "_generate_dags"]
+  # PR #498 — `clean_dags()` removed with no in-code replacement;
+  # callers must rely on `[dag_processor] refresh_interval`.
+  removed_methods: ["clean_dags"]
+  # PR #546 kwarg renames on `load_yaml_dags`. Shape is symmetric for
+  # dict and path forms.
+  renamed_kwargs:
+    default_args_config_dict: "defaults_config_dict"
+    default_args_config_path: "defaults_config_path"
+    config: "config_dict"
+  # Required new public symbol. Migrating without it is a missed
+  # rewrite — text-scan suffices because the only legitimate caller
+  # is at module top level.
+  required_symbol: "load_yaml_dags"
+
+# YAML-side breaks. These are scanned over `.yml` / `.yaml` files
+# under the project's `dags/` tree.
+yaml:
+  # PR #503 — `schedule_interval:` rejected at every level.
+  forbidden_dag_keys: ["schedule_interval"]
+  # PR #512 — every shortcut key removed. The ones the migration
+  # guide lists explicitly; new shortcuts won't appear in 1.0+.
+  forbidden_sec_shortcut_keys:
+    - "dagrun_timeout_sec"
+    - "dagrun_timeout_secs"
+    - "retry_delay_sec"
+    - "retry_delay_secs"
+    - "sla_sec"
+    - "sla_secs"
+    - "execution_delta_sec"
+    - "execution_delta_secs"
+    - "execution_timeout_sec"
+    - "execution_timeout_secs"
+  # PR #512 also forbids bare-int values for these — must be a
+  # `__type__: datetime.timedelta` block.
+  timeout_keys: ["dagrun_timeout", "retry_delay", "sla", "execution_delta", "execution_timeout"]
+  # PR #525 logical-key consolidation. The legacy YAML *tags*
+  # (`!and`, `!or`, `!join`) and bare aliases (`and:`, `or:`,
+  # `join:` used as dataset operators) are both rejected. Note the
+  # `__join__` form is the migration-guide spelling; the upstream
+  # CHANGELOG renders it `join__` (typo) — implementation accepts
+  # the dunder.
+  forbidden_logical_tags: ["!and", "!or", "!join"]
+  required_logical_keys: ["__and__", "__or__", "__join__"]
+  # PR #586 / #588 advisory. Silently stripped on AF >= 3.1 with
+  # dag-factory >= 1.0.1.
+  silently_stripped_dag_kwargs: ["sla_miss_callback"]
+  # PR #533 — custom `timetable:` parsing replaced with the
+  # `__type__/__args__` shape.
+  timetable_required_keys: ["__type__"]
+  timetable_forbidden_keys: ["callable", "params"]
+  # PR #523 — KPO nested objects must be type-annotated. The
+  # primitive checks the keys that previously auto-cast.
+  kpo_typed_blocks: ["resources", "volumes", "volume_mounts", "env_from"]
+  kpo_type_prefix: "kubernetes.client.models.V1"
+  # The real `kubernetes.client.models.V1*` classes that legitimately
+  # appear inside the `kpo_typed_blocks` above (resources / volumes /
+  # volume_mounts / env_from) and their nested sources. A prefix-only
+  # check accepts a fabricated `V1Garbage`; validating the bare class
+  # name against this curated set rejects a marker that merely starts
+  # with the prefix. Curated to the pod-spec surface KPO round-trips —
+  # not the entire kubernetes API (a CRD / HPA class under
+  # `resources:` is nonsensical and must not validate).
+  kpo_v1_classes:
+    # resources:
+    - "V1ResourceRequirements"
+    - "V1VolumeResourceRequirements"
+    # volume_mounts:
+    - "V1VolumeMount"
+    # volumes: the Volume wrapper + every volume source it can hold
+    - "V1Volume"
+    - "V1PersistentVolumeClaimVolumeSource"
+    - "V1HostPathVolumeSource"
+    - "V1EmptyDirVolumeSource"
+    - "V1ConfigMapVolumeSource"
+    - "V1SecretVolumeSource"
+    - "V1NFSVolumeSource"
+    - "V1CSIVolumeSource"
+    - "V1DownwardAPIVolumeSource"
+    - "V1ProjectedVolumeSource"
+    - "V1AWSElasticBlockStoreVolumeSource"
+    - "V1GCEPersistentDiskVolumeSource"
+    - "V1AzureDiskVolumeSource"
+    - "V1AzureFileVolumeSource"
+    - "V1EphemeralVolumeSource"
+    - "V1KeyToPath"
+    - "V1DownwardAPIVolumeFile"
+    - "V1VolumeProjection"
+    # env_from / env sources:
+    - "V1EnvVar"
+    - "V1EnvVarSource"
+    - "V1EnvFromSource"
+    - "V1ConfigMapEnvSource"
+    - "V1SecretEnvSource"
+    - "V1ConfigMapKeySelector"
+    - "V1SecretKeySelector"
+    - "V1ObjectFieldSelector"
+    - "V1ResourceFieldSelector"
+    # shared references reachable from the above
+    - "V1LocalObjectReference"
+    - "V1ObjectMeta"
+
+# Provider-decl checks. PR #486 stopped pulling these in
+# transitively. Maps a YAML operator-name pattern to the provider
+# requirement that satisfies it.
+providers:
+  http:
+    operator_substrings: ["HttpOperator", "SimpleHttpOperator", "HttpSensor", "HttpHook"]
+    requirement_names: ["apache-airflow-providers-http"]
+    extras_aliases: ["http", "all"]
+  cncf-kubernetes:
+    operator_substrings: ["KubernetesPodOperator", "KubernetesJobOperator"]
+    requirement_names: ["apache-airflow-providers-cncf-kubernetes"]
+    extras_aliases: ["kubernetes", "all"]

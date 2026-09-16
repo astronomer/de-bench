@@ -1,0 +1,105 @@
+# What the agent has to work out, in order.
+#
+#   1. The published sessions count events by where a row sits in the stream —
+#      producer, partition, offset. That is a real dedup key for an at-least-once
+#      feed and it was right until January.
+#   2. The replay reissued events at fresh offsets under their original
+#      `event_id`, so stream position stopped identifying an event and
+#      `event_id` is the only thing that still does. The incident note says this
+#      in plain words; the repair DAG, `replayed_events` in the same module and
+#      `stg_ecommerce__web_events` in the dbt project all say it again.
+#   3. The days that carry the damage are NOT the days the note names. The
+#      collector SENT the replay on 20 to 22 January; the events it sent
+#      happened on 11 to 13 January, and 14 January was dropped whole and exists
+#      only because of the replay.
+#   4. The fix belongs in `projects/growth/lib/sessions.py`, where the number is
+#      defined for four DAGs, and not in any one of them.
+#
+# THE GRADING IS DIFFERENTIAL AND HOLDS NO AUTHORED EXPECTED RESULT. Every day
+# is compared against the events `raw.web_events` holds for that day, read in
+# the same session. The days come in four kinds — repeats, the wholly recovered
+# day, the day inside the window the note names, and two ordinary days months
+# away — and the verifier's own first test checks the world still holds the
+# incident before it grades anything. The verifier docstring lists all six.
+#
+# Wrong answers, and what convicts each:
+#
+#   dedup kept on stream position (the shipped state)
+#       11 and 13 January come out high. test_a_day_the_collector_resent...
+#
+#   the replayed rows filtered out, by `offset >= 900000000`, by a `load_time`
+#   between 20 and 22 January, or by any other reading of "drop the replay"
+#       14 January is the whole day the collector dropped, and every one of its
+#       events arrived on the replay. The day comes out empty.
+#       test_the_day_the_collector_dropped_whole_keeps_its_recovered_events
+#
+#   the replayed rows DELETED out of `raw.web_events`
+#       landed source is read-only and the note says the replay is additive on
+#       purpose. test_the_feed_keeps_every_row_it_held runs after every rebuild
+#       and counts the repeats still in the feed. A delete run by hand in the
+#       agent's own shell cannot reach this: the scorer lays the warehouse again
+#       from the image and grades the tree, so such an answer is graded as
+#       though it never happened — and it still fails, because the count is
+#       still wrong.
+#
+#   the fix keyed to the dates the incident note prints
+#       20 January is inside that window and is an ordinary day with no repeat
+#       on it. test_an_ordinary_day_does_not_move
+#
+#   the fix put in `gro_sessionize_daily` rather than in the definition
+#       `gro_event_replay_repair` and two mart DAGs build through the same
+#       module and keep the old number. The verifier drives the module, which is
+#       the call all four make, so a DAG-level repair changes nothing it sees.
+#       The ticket states this as the contract.
+#
+#   the dbt models "fixed"
+#       `stg_ecommerce__web_events` already dedups on `event_id` and says why.
+#       Editing it is work with no effect; nothing here grades it either way.
+#
+#   the count columns dropped, or the grain changed to make the totals agree
+#       test_the_published_grain_did_not_move, and the per-session comparison
+#       needs every count column.
+#
+#   a fix that dedups on (`session_id`, `event_time_utc`) instead of `event_id`
+#       PASSES, and that is honest rather than an oversight. It is the wrong key
+#       — the contract's key is `event_id` and the feed carries it for this — but
+#       no session in this world holds two events in the same minute, so the two
+#       keys give the same answer on every day and no outcome can separate them.
+#       Convicting it would need a check on the shape of the code, and the
+#       ticket asks for a number, not a shape.
+#
+# The library is a plain module the DAGs import, so nothing needs replaying
+# first: the verifier calls it against the landed feed the world ships.
+replay: []
+
+checks:
+
+# The two DAGs that build through the patched module still import. A syntax or
+# name error in the library takes both down, and four DAGs with them.
+- kind: dag_parses
+  dag_id: gro_sessionize_daily
+- kind: dag_parses
+  dag_id: gro_event_replay_repair
+
+# Sessionization kept its shape: pick the days, rebuild each one, stitch the
+# guest orders, count the repeats, hold the grain, record the volume, publish.
+# Deleting the rebuild or the grain check would make a broken build quiet.
+- kind: dag_structure
+  dag_id: gro_sessionize_daily
+  # An added task is not a defect: the house style is a check step per
+  # concern, and the first matrix convicted a correct fix for adding one.
+  allow_extra: true
+  task_ids:
+  - days_to_rebuild
+  - build_day
+  - stitch_orders
+  - replay_duplicates
+  - session_grain
+  - record_volume
+  - publish_sessions
+
+# The six graded days, the volume row the alert reads, the feed left whole, and
+# the second run that must change nothing.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

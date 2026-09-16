@@ -1,0 +1,7 @@
+checks:
+- kind: scoring_primitive
+  name: airflow_pin_target_aligned
+- kind: scoring_primitive
+  name: no_deprecated_usage
+- kind: scoring_primitive
+  name: structural_match_taskids

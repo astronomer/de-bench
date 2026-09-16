@@ -1,0 +1,4 @@
+{
+  "removed_symbols": ["SnowflakeOperator"],
+  "notes": "SnowflakeOperator was removed in apache-airflow-providers-snowflake 6.0; use SQLExecuteQueryOperator with the Snowflake hook."
+}

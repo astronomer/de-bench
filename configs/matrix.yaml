@@ -1,0 +1,53 @@
+# The benchmark matrix: named configs of (agent, model, thinking).
+#
+# Tier 1 is the Databricks-style frontier grid — every harness x the model tiers
+# it can serve, thinking held at that harness's standard level. Comparing columns
+# at a fixed harness gives the model frontier; comparing harnesses at a fixed
+# model isolates harness impact (pi vs claude-code = harness efficiency; pi vs
+# codex on the same gpt tier = the same reading across the OpenAI family).
+#
+# pi runs both model families: the image's extension registers the gateway's
+# OpenAI routes as a second provider, and agents/pi.py picks by model prefix.
+#
+# Tier 2 sweeps thinking on one harness+model (pi/sonnet — pi has the cleanest
+# thinking dial) to measure what thinking buys per dollar. `high` is deliberately
+# absent: pi-sonnet in tier 1 already runs it.
+#
+# Notes on thinking values: claude-code has no thinking flag (its adapter only
+# acts on xhigh/max), and opencode only distinguishes high/max — for both,
+# `medium` means "the harness's default behavior". codex maps thinking to
+# reasoning effort (off/minimal->low, xhigh/max->high).
+
+configs:
+  # Tier 1 — frontier grid
+  - {name: pi-haiku, agent: pi, model: claude-haiku-4-5, thinking: high}
+  - {name: pi-sonnet, agent: pi, model: claude-sonnet-5, thinking: high}
+  - {name: pi-opus, agent: pi, model: claude-opus-5, thinking: high}
+  - {name: claude-code-haiku, agent: claude-code, model: claude-haiku-4-5, thinking: medium}
+  - {name: claude-code-sonnet, agent: claude-code, model: claude-sonnet-5, thinking: medium}
+  - {name: claude-code-opus, agent: claude-code, model: claude-opus-5, thinking: medium}
+  - {name: opencode-haiku, agent: opencode, model: claude-haiku-4-5, thinking: medium}
+  - {name: opencode-sonnet, agent: opencode, model: claude-sonnet-5, thinking: medium}
+  - {name: opencode-opus, agent: opencode, model: claude-opus-5, thinking: medium}
+  - {name: codex-luna, agent: codex, model: gpt-5.6-luna, thinking: medium}
+  - {name: codex-terra, agent: codex, model: gpt-5.6-terra, thinking: medium}
+  - {name: codex-sol, agent: codex, model: gpt-5.6-sol, thinking: medium}
+  - {name: pi-luna, agent: pi, model: gpt-5.6-luna, thinking: high}
+  - {name: pi-terra, agent: pi, model: gpt-5.6-terra, thinking: high}
+  - {name: pi-sol, agent: pi, model: gpt-5.6-sol, thinking: high}
+
+  # Tier 1b — hold thinking still so the harness is the only thing that moves.
+  # Tier 1 runs each harness at its own standard level, which welds the two
+  # together: pi-sol at high beating codex-sol at medium cannot say which of them
+  # did it. At `medium` the grid is nearly complete already — claude-code,
+  # opencode and codex all run there in tier 1, and pi-sonnet-medium is in tier 2
+  # below — so two cells finish it. Deliberately no new names for the four that
+  # exist: a second name for the same (agent, model, thinking) is the same cell,
+  # and the snapshot merges cells by identity, not by label.
+  - {name: pi-terra-medium, agent: pi, model: gpt-5.6-terra, thinking: medium}
+
+  # Tier 2 — thinking sweep on pi/sonnet
+  - {name: pi-sonnet-off, agent: pi, model: claude-sonnet-5, thinking: "off"}
+  - {name: pi-sonnet-low, agent: pi, model: claude-sonnet-5, thinking: low}
+  - {name: pi-sonnet-medium, agent: pi, model: claude-sonnet-5, thinking: medium}
+  - {name: pi-sonnet-xhigh, agent: pi, model: claude-sonnet-5, thinking: xhigh}

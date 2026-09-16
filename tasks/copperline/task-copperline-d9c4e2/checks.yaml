@@ -1,0 +1,144 @@
+# Both processors delivered settlement files for the same payments through the
+# migration quarter, on purpose. `int_gl_postings_unified` posts both books
+# whole — the Meridian branches take every live event of the three posting
+# types, the Halcyon branches take every SETTLED and REVERSED row, and neither
+# asks which book was authoritative on the date. So the card subledger books the
+# same cash twice for a quarter, about 8% of every card posting in the warehouse.
+#
+# `marts.cash_recon_daily` is the model that should have caught it. Its own
+# header says it reports the overlap and cannot resolve it, and its processor
+# side sums the two feeds the same whole way the ledger does — so the day's
+# ledger cash and the day's processor total agree to the cent on every day of
+# the overlap, because both of them are doubled. That agreement is the ticket's
+# opening fact and it is a tautology.
+#
+# `raw.pay_processor_windows` is the record. It holds Halcyon through 2025-08-31
+# and Meridian from 2025-09-01, so the authority changes hands in the MIDDLE of
+# the overlap and not at the end of it. `docs/runbooks/processor-migration.md`
+# PRM-1 and `docs/billing-integration.md` B-8 both say a row outside its
+# processor's window is shadow traffic and is not counted — a row, on its own
+# date, not a payment on the payment's date. The runbook spends its last
+# paragraph on the case that separates the two: a payment captured in August and
+# settled in September is claimed by both books and both are right.
+#
+# The table is not a dbt source and has no staging view, and `_sources.yml` and
+# `projects/platform/README.md` rule 1 both say a model may not reach a landed
+# table without one. Landing it is part of the job. DQ-93 (task-copperline-c2b7f1)
+# is the same record read for the commerce settlement reconciliation; that ticket
+# NAMES this model as a second reader of the overlap and deliberately leaves it
+# alone, and this one is the repair. The two touch no file in common, and the
+# commerce tree is shut here.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier computes every expected
+# result from `raw.pay_meridian_settlements`, `raw.pay_halcyon_settlements`,
+# `raw.pay_processor_windows` and the staging layer in the same session —
+# including the two boundary dates, which it reads rather than names. The four
+# other subledgers are counted out of the staging views the same way, so a world
+# rebuilt at another scale grades against its own numbers.
+#
+# WHY DBT RUNS. `AGENTS.md` ("The warehouse") says the snapshot ships the landed
+# half only, so neither the ledger nor the mart exists until dbt has made them.
+# The prepare step builds the chain. The verifier runs dbt again for the
+# published reader, for the two nightly ties and for the mutation. No DAG
+# replays: `fin_cash_recon_daily` reads columns no table in this world has and
+# the ticket puts it out of scope.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   leave both books in and only reword     verifier: the card subledger holds
+#     the mart                              407,640 postings the authoritative
+#                                           books do not support
+#   drop the legacy feed entirely           verifier: every Halcyon posting from
+#     ("Halcyon is dead")                   before the boundary goes missing
+#   drop every dual-fed row, both sides     verifier: the missing count, and the
+#                                           money that was authoritative
+#   take the boundary as the end of the     verifier: the September postings come
+#     shadow quarter (2025-09-30) rather    out wrong, and the mutation moves the
+#     than the windows table's              table under a typed-in date
+#   type the two dates into the model       verifier: the boundary is moved in
+#                                           raw.pay_processor_windows and both
+#                                           models have to follow it
+#   compare against `authoritative_to`      verifier: Meridian's window has no
+#     without closing the open window       end, so every Meridian posting in the
+#                                           warehouse disappears
+#   decide on the payment or the order      verifier: the rows either side of the
+#     rather than on the row's own date     boundary, which is the case the
+#                                           runbook closes on
+#   filter the overlap out in staging       verifier: the staging views are 1:1
+#                                           with the landed feeds, and commerce
+#                                           reads them for its own ticket
+#   cut the cash leg and leave the          verifier: tie_postings_balance_by_
+#     clearing leg                          document, which the ledger exists for
+#   keep the shadow rows and zero their     verifier: the postings are compared by
+#     amounts, or post them to a suspense   source_line_ref, and the ticket says
+#     account                               the ledger does not post them
+#   rebuild the postings model rather       verifier: the four other subledgers
+#     than cut rows out of one book         are counted out of staging, and
+#                                           revenue_entity_daily has to build
+#   fix the ledger and leave the mart       verifier: the mart's three day figures,
+#                                           and the ledger-to-mart tie that holds
+#                                           today only because both are doubled
+#   fix the mart and leave the ledger       the same two, from the other side
+#   cut the processor totals to the         verifier: `least()` of two figures one
+#     window and leave `shadow_overlap_     of which is now zero is zero, on 93 of
+#     cents` as the smaller of the two      the 94 days
+#   move the mart to a finer grain so       verifier: the day-grain check says so
+#     the day figures split                 by name; the ticket pins the grain
+#   turn the ledger ties into warnings      file_lacks on the finance tie
+#                                           directory, file_contains on
+#                                           dbt_project.yml
+#   a note and no code change               every substantive verifier test
+#
+# WHAT IS NOT GRADED, on purpose. `processor_txn_count` is a count and not
+# money; the ticket says nothing about it and neither does anything here, so
+# counting the shadow files or leaving them out both pass. `is_shadow_quarter_day`
+# is not graded either: in the built world "both processors delivered that day"
+# and "the day carries a shadow row" are true of exactly the same 94 days, so the
+# shipped expression is already right and a rewritten one that means the same
+# thing is too. How the two models reach the windows table is not graded —
+# a staging view is what `_sources.yml` and rule 1 ask for, but a model that
+# lands it some other correct way is not convicted for the route.
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES. Nothing here says where in the chain the
+# shadow rows must be cut. A fix that filters inside `int_gl_postings_unified`'s
+# card branches and one that builds the authoritative set in a CTE above them
+# both pass, and so does one that pushes the window into a new intermediate model
+# between staging and the ledger — the card subledger is graded on the postings
+# it holds, not on the shape of the SQL that made them.
+
+replay: []
+
+checks:
+
+# The substance: the card subledger against the two feeds and the windows table,
+# the four other books against the staging layer, the recon mart's three day
+# figures, the ledger-to-mart tie, and the windows table moved under both models.
+# See verifier/test_outputs.py.
+- kind: pytest_verifier
+  file: test_outputs.py
+  prepare:
+  - cd dbt/copperline_analytics && /opt/dbt-venv/bin/dbt run --select +cash_recon_daily --profiles-dir .
+  timeout: 1200
+
+# The cheap way to make the verifier's tie check green without keeping the
+# ledger honest. The verifier runs `dbt test` over the two finance ties and reads
+# the exit code, and a test demoted to a warning exits zero. The glob is the
+# whole finance tie directory, so the same move made in a sibling tie is caught
+# too. Only the warning value and the two thresholds are named, so a test that
+# says `severity='error'` out loud is not convicted for being explicit.
+- kind: file_lacks
+  path: dbt/copperline_analytics/tests/finance/*.sql
+  patterns:
+  - "severity\\s*[=:]\\s*['\"]?warn"
+  - 'warn_if'
+  - 'error_if'
+  - '\bwhere\s+false\b'
+  - '\b1\s*=\s*0\b'
+  - '\blimit\s+0\b'
+
+# The suite-wide severity. One word under `tests:` in the project file turns all
+# 625 tests into warnings and the nightly stops meaning anything.
+- kind: file_contains
+  path: dbt/copperline_analytics/dbt_project.yml
+  matches:
+  - '\+severity:\s*error'

@@ -1,0 +1,151 @@
+# The deliverable is a written assessment, so every check reads RESPONSE.md.
+# The six of them grade six separate findings, one per heading the ticket asks
+# for, plus the two halves of "what changes numbers". Each finding is a fact
+# that only exists in the tree: a version range, a count of call sites, a
+# schedule, a package namespace, a stamped manifest version. An assessment
+# written from general dbt knowledge holds none of them.
+#
+# Patterns are matched case-insensitively with re.search under re.DOTALL, so
+# `.` crosses lines and `[^\n]` is how a pattern stays on one. They are written
+# loose on purpose: a figure may carry a comma, a label may be bold or
+# bracketed, a claim may be a bullet or a table row. What each pattern pins is
+# a figure, a name or a stated negation, never a phrasing.
+#
+# WHERE EVERY GRADED FACT LIVES, all paths relative to the workspace root:
+#
+#   1  dbt/copperline_analytics/dbt_project.yml:14
+#        require-dbt-version: [">=1.6.0", "<1.7.0"]
+#   2  15 call sites of dbt_utils.surrogate_key, one per file, in
+#        models/shared/staging/ (6), models/shared/intermediate/ (2),
+#        models/shared/dims/ (1), models/supply/ (3), models/commerce/ (1),
+#        models/finance/intermediate/ (1), models/customer/ (1).
+#        dbt/copperline_analytics/dbt_project.yml:24 holds the var
+#        `surrogate_key_treat_nulls_as_empty_strings: true`; dbt/README.md:48-53
+#        and dbt/copperline_analytics/packages.yml:4-9 both name
+#        `generate_surrogate_key` as the 1.x name.
+#   3  dbt/copperline_analytics/dbt_project.yml:29-33 (on-run-start /
+#        on-run-end), dbt/copperline_analytics/macros/audit.sql:13-66 (the two
+#        hooks insert into ops_run.dbt_run_events),
+#        dbt/copperline_analytics/models/shared/ops/ops_audit_log.sql (the
+#        incremental model over those rows),
+#        projects/platform/dags/plat_dbt_source_freshness.py:44 (schedule
+#        "15 * * * *", so 24 invocations a day) and :55-63 (it runs
+#        `dbt source freshness`).
+#   4  dbt/northwave_reporting/ holds 41 model files (20 legacy, 11 marts, 10
+#        staging); dbt/northwave_reporting/packages.yml:2-3 asks for
+#        `fishtown-analytics/dbt_utils` at 0.6.4.
+#   5  dbt/copperline_analytics/manifest/manifest.json metadata:
+#        dbt_schema_version .../manifest/v10.json, dbt_version 1.6.14.
+#        projects/platform/dags/plat_dbt_analytics_daily.py:40 and :65 render
+#        the nightly build from that committed file.
+#   6  docs/runbooks/upgrade.md:22-24 states what the pre-flight covers and the
+#        four things it does not; :43 records that its symbol list is
+#        hardcoded and stale. projects/platform/dags/plat_upgrade_check.py:6-9
+#        says the same in the DAG that runs it weekly.
+#
+# THE WRONG ANSWERS, AND WHAT KILLS EACH:
+#
+#   "The pre-flight is green, so this is a version bump."   killed by 1-5, none
+#       of which the pre-flight can produce.
+#   "dbt-utils 1.x renames surrogate_key, so rename the calls."   killed by
+#       check 2's var: a rename alone changes every key's value.
+#   "Write our own surrogate_key macro to keep the old hashing."   killed by
+#       check 2's var: the escape hatch is a var the project already sets, and
+#       dbt/README.md:51-53 says not to turn it off.
+#       (Both of these also fail the count, which needs the grep.)
+#   "Some models use surrogate_key."   killed by check 2's count.
+#   "Nothing else changes; the rest is the same dbt."   killed by check 3: a
+#       job that never wrote an audit row starts writing 24 a day.
+#   "The freshness job is unaffected — it only reads."   killed by check 3.
+#   "northwave_reporting is orphaned, so ignore it."   killed by check 4: the
+#       count and the dead package namespace are only visible from inside it.
+#   "Regenerate the manifest after the upgrade."   killed by check 5's
+#       proximity: the version the committed file is stamped with is in the
+#       file, not in the pin table.
+#   "The clean report means the imports are fine."   killed by check 6, which
+#       needs a stated limit on the pre-flight's scope, not a restatement.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# 1. The loud one, and the first thing that happens. The analytics project
+# declares the core versions it will run under and 1.10 is outside the range,
+# so dbt refuses the project before it compiles a model. It is one line, it is
+# the cheapest finding in the tree, and the pre-flight cannot see it because it
+# reads dags/ and not dbt/.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'require-dbt-version'
+  - '(<\s*"?1\.7|1\.7\.0)'
+
+# 2. The silent one that reaches furthest. `dbt_utils.surrogate_key` is gone at
+# 1.x; the rename is `generate_surrogate_key` and it hashes NULL differently,
+# so a mechanical rename changes every key value in the shared layer. The var
+# that holds the old hashing is already set in dbt_project.yml, which is why
+# naming it is the difference between a fix and a restatement. The count is
+# what separates a reader from a guesser: fifteen call sites, one per file,
+# across six of the seven model directories.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'generate_surrogate_key'
+  - 'surrogate_key_treat_nulls_as_empty_strings'
+  - '((\b15\b|fifteen)[^0-9\n]{0,40}(model|call|site|file|place|usage)|(model|call site|file|place|usage)[^0-9\n]{0,40}(\b15\b|fifteen))'
+
+# 3. The one the ticket points at and the pre-flight structurally cannot reach:
+# at 1.10 `dbt source freshness` runs the project's on-run-start and on-run-end
+# hooks. Those hooks are this project's run audit, so the hourly freshness job
+# starts writing an open and a close row per invocation into
+# ops_run.dbt_run_events, and ops_audit_log — an incremental model that must
+# not be full-refreshed — inherits 24 rows a day that are not builds. All three
+# patterns are needed together: naming the job proves the trace, naming the
+# hook or the table proves it went the whole way, and the cadence proves it
+# read the schedule rather than assumed one.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(plat_dbt_source_freshness|source freshness)'
+  - '(on-run-start|on-run-end|dbt_run_events|ops_audit_log|copperline_audit)'
+  - '(hourly|every hour|\b24\b)'
+
+# 4. The second project. It is 41 models against a different profile and a
+# different file, and its packages.yml still asks dbt Hub for
+# `fishtown-analytics/dbt_utils` at 0.6.4 — a namespace and a version from
+# before the rename. Both facts need the project opened; neither is in
+# dbt/README.md, which only says the project exists and that most of it does
+# not run.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'northwave_reporting'
+  - '((\b41\b)[^0-9\n]{0,30}model|model[^0-9\n]{0,30}(\b41\b))'
+  - '(fishtown|0\.6\.4)'
+
+# 5. The nightly build does not run dbt to work out its graph — cosmos renders
+# it from a manifest committed in the repo, and that file is stamped with the
+# version that wrote it. Until it is rebuilt under the new core, the DAG that
+# builds every mart in the company is rendering from a 1.6 artifact. The
+# version has to sit against the manifest on the same line, because the pin
+# table in dbt/README.md gives 1.6.14 away for free and the stamp inside the
+# file does not.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(manifest[^\n]{0,120}(v10|1\.6\.14)|(v10|1\.6\.14)[^\n]{0,120}manifest)'
+  - '(plat_dbt_analytics_daily|cosmos)'
+
+# 6. The green is worthless and the reply has to say why in terms of scope, not
+# tone. The pre-flight reads imports under dags/ and compares them against a
+# hardcoded symbol list; every finding above lives in dbt/, in a macro, in a
+# package pin or in a default that changed. A stated negation is the only thing
+# that separates "I read what it checks" from "I distrust it in general".
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(check_upgrade|plat_upgrade_check|pre-?flight)'
+  # \b at both ends on purpose: a bare `import` would take "important" as a hit.
+  - '\bimports?\b'
+  - '(does not|doesn.t|do not|never|cannot|can.t|no)[^\n]{0,60}(read|reads|see|sees|check|checks|look|looks|inspect|open|cover|covers|touch)[^\n]{0,60}(dbt|project|config|macro|package|behaviour|behavior|pin)'

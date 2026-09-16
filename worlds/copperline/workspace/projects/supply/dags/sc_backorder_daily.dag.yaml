@@ -1,0 +1,41 @@
+dag_id: sc_backorder_daily
+schedule: "30 7 * * *"
+description: open backorders and how long each has been open
+default_args:
+  owner: supply
+  retries: 2
+tags: [supply, mart, service]
+steps:
+  wait_for_position:
+    blueprint: sensor_wait
+    asset: marts.inventory_position
+    partition_col: ds
+    timeout: 7200
+    poke_interval: 300
+  build:
+    blueprint: dbt_select
+    depends_on: [wait_for_position]
+    select: backorder_daily
+    vars:
+      run_date: "{{ ds }}"
+  test:
+    blueprint: dbt_select
+    depends_on: [build]
+    command: test
+    select: backorder_daily
+  age:
+    blueprint: rollup
+    depends_on: [test]
+    source: marts.backorder_daily
+    group_by: [location_id, age_band]
+    agg: sum
+    column: backorder_units
+    as: backorder_units
+    target: marts.backorder_age_daily
+  export:
+    blueprint: partition_export
+    depends_on: [age]
+    source: marts.backorder_daily
+    layer: marts
+    name: backorders
+    order_by: [location_id, sku]

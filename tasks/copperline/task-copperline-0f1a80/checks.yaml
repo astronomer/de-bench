@@ -1,0 +1,144 @@
+# Two findings, one table, and both of them ship in the world untouched.
+#
+# ONE. `marts.churn_scores_weekly` has three writers and three shapes. The
+# nightly build materialises `dbt/copperline_analytics/models/customer/
+# churn_scores_weekly.sql` into it — points out of a hundred, a `churn_risk`
+# band, keyed on `week_of`, with an `accepted_range` of 0..100 on the score.
+# `projects/customer/lib/churn.py` delete-inserts a weighted score between
+# nought and one into the same name, keyed on `ds`. And `backfill.replay`,
+# reached from `cus_northwave_backfill`, replays account attributes into it out
+# of the frozen `nwv` copy with no score on the row at all. The model is
+# `materialized='table'`, so the two have never been in the table together:
+# whichever ran last owned it, and the job's delete on `ds` cannot even bind
+# against the model's columns.
+#
+# TWO. `build_features` bounds the recency part above and not below —
+# `least(1.0, date_diff('day', last_order_date, DATE '<ds>') / 365.0)`. For any
+# week that is not the current one, an account that has ordered since counts
+# back a negative number of days, so recency's weight is subtracted from the
+# score. Measured against the fixture the verifier builds: 2,295 of 3,960
+# accounts score below nought on 2026-04-10, 3,360 on 2026-02-20 and 3,897 on
+# 2025-11-14. `check_scores` rejects every one of them, which is the failure
+# the ticket opens with.
+#
+# Nothing here holds an authored score. The verifier computes every expected
+# result from `raw.*` in the same session, part by part in Python, and checks
+# the five weights against the module rather than reading them from it.
+#
+# WHY NOTHING RUNS THE DAG. The world ships the landed half of the warehouse
+# (`AGENTS.md`, "The warehouse"): `marts.customer_360` is a dbt model and is not
+# on disk until a 143-model build has made it, and neither `ops.churn_features`
+# nor any mart is. The verifier makes the three relations out of `raw.*` and
+# calls the patched module the way the DAG's tasks call it, which grades the
+# same code in minutes instead of half an hour. It also removes the second
+# reason a run would say nothing: a trial's patch never carries anything under
+# `include/data`, so a week an agent scored by hand is a week no check reads.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code change  verifier: the job's table
+#                                                    holds no row
+#   the job goes on writing marts.churn_scores_weekly  verifier: the delete on
+#     (the collision left where it is)                 `ds` cannot bind against
+#                                                      the model's columns, and
+#                                                      the model's table is
+#                                                      re-read row by row
+#   the dbt model re-cut to match the job            do_not_modify: dbt/**
+#   the score multiplied by a hundred to suit        verifier: every score is
+#     retention's "70 or more" filter                 measured against the
+#                                                     weighted sum, and against
+#                                                     the guard's range
+#   `score_problems` widened to let the rebuild      verifier: the guard is
+#     through                                        handed a -0.5 row on a week
+#                                                    nothing grades and must
+#                                                    still object
+#   the whole score clamped instead of the parts     verifier: the two differ on
+#     (`greatest(0, weighted_sum)`)                   every account whose recency
+#                                                    went negative but whose
+#                                                    total did not
+#   the accounts that ordered after the week dropped verifier: every account the
+#                                                    360 holds gets a row
+#   the weights retuned to keep the total positive   verifier: WEIGHTS is
+#                                                    compared with the module's
+#   the file renamed with the table                  verifier: the published
+#                                                    path is the one retention
+#                                                    reads
+#   the week appended rather than replaced           verifier: the rebuild test
+#   a step deleted to get a green run                dag_structure
+#   the DAG or the module broken                     dag_parses
+#   a note that names one writer and stops           file_contains: the replay
+#                                                    and the two scales
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES. Bounding only the recency part, rather
+# than all five, gives the same answer on every row — the other four cannot
+# leave the unit — and the verifier is written against the result, not against
+# the shape of the expression. That reading passes and should.
+#
+# The graded weeks are 2026-04-10, 2026-02-20 and 2025-11-14. The ticket names a
+# window of twelve weeks and none of the three by name; two of them sit outside
+# that window altogether. All three are outside the world's reserved windows and
+# outside the never-grade tail.
+replay: []
+
+checks:
+
+# The tree still imports, and the DAG is still there.
+- kind: dag_parses
+  dag_id: cus_churn_scores_weekly
+
+# The house shape holds: the fiscal week, the lifecycle build, the features, the
+# score, the guard, the publish. A rebuild that "runs" because the guard or the
+# score step was deleted is not a fix, and the substance checks below cannot
+# tell the difference on their own. `allow_extra` keeps the guard against
+# deletion without convicting a fix that adds a step of its own — the ticket
+# says the six steps stay, not that a seventh is forbidden.
+- kind: dag_structure
+  dag_id: cus_churn_scores_weekly
+  allow_extra: true
+  task_ids:
+  - scoring_week
+  - lifecycle
+  - features
+  - score
+  - check_scores
+  - publish_scores
+  operators:
+    lifecycle: BashOperator
+
+# The substance. See verifier/test_outputs.py — three weeks, the score part by
+# part, the table the job may not write, the scale on the row, the guard, the
+# rebuild and the published file.
+- kind: pytest_verifier
+  file: test_outputs.py
+
+# The note retention asked for. Four decisions, and the headline — that there
+# are two scores — is one of them rather than all of them. Patterns are matched
+# case-insensitively with re.search and are written loose on purpose: each pins
+# a figure or a named thing, never a phrasing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The two producers that carry a score. The nightly model is the one the
+  # ticket points at obliquely; naming it is the first half of the answer.
+  - 'churn_scores_weekly'
+  - '(nightly|dbt|model|manifest|04:00|plat_dbt_analytics_daily)'
+  # The third writer. It is reachable only by reading `backfill.py` or
+  # `cus_northwave_backfill`, and a note that stops at two writers has not
+  # looked. This is the line that separates a read of the ticket from a read of
+  # the tree.
+  - '(backfill|replay|northwave)'
+  # The two scales, named. A response that says "they disagree" without saying
+  # what either one is tells retention nothing they can act on.
+  - '(0-100|out of (a )?hundred|out of 100|0 to 100|zero to (a )?hundred|100-point|hundred)'
+  # The en-dash and hyphenated spellings joined after a 3-trial audit: "a 0–1
+  # weighted score" and "zero-to-one" state the scale and matched nothing. The
+  # dash arm takes spaces only, never a newline — "0\n- 1" is a list, not a
+  # range.
+  - '(0-1\b|0 to 1\b|0 ?[-–] ?1\b|(zero|nought)[-– ]to[-– ]one|(zero|nought)-to-one|between 0 and 1|between nought and one|0\.0? to 1\.0?)'
+  # Which one retention receives, and why the other one cannot have been it.
+  # The file is the evidence: it is the only surface any of the three writes.
+  - '(churn_scores_[<{]?ds|include/data/marts|publish|the file|csv)'
+  # What the rebuild died on. The answer is the unbounded part and not the
+  # accounts: a note that blames the data has read the symptom and stopped.
+  - '(negative|below (nought|zero)|no lower bound|unbounded|not bounded|less than (nought|zero)|out of range)'
+  - '(recency|last order|days since)'

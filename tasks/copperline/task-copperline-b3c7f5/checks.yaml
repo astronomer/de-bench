@@ -1,0 +1,137 @@
+# The ask is two steps of one job. `fin_invoice_dispute_daily` checks and
+# publishes `marts.dispute_daily`, and both steps were written against a shape
+# the mart has not got: the cents check names `written_off_cents` and the
+# publish sorts by `entity, dispute_state`. The mart is commerce's model, cut by
+# dispute status and reason code on the day a dispute was raised, with one
+# chargeback row a day off the settlement feed. It has none of those three
+# columns.
+#
+# The two faults fail in opposite ways, and that is the shape of the ticket.
+# `publish` raises on the first name it cannot bind, so no day of that mart has
+# ever reached a file and the failure is loud. `assert_integer_cents` passes
+# over a name the table has not got — `projects/finance/lib/warehouse_checks.py`
+# does the lookup with `if name in types` — so the check has been green for two
+# years while looking at one of the two columns it names. One of these is found
+# by running the job; the other is only found by reading the helper.
+#
+# DECISION 1 — the mart is not the thing to change. The pull is towards giving
+# commerce's model an `entity` and a `written_off_cents`, which is the shape
+# finance specced and never got. `dbt/**` is protected and the ticket says
+# commerce will not re-cut their model, so the fix lands at the call site. This
+# is the same floor CRD-140 (`task-copperline-d17be4`) carries, for the same
+# reason.
+#
+# DECISION 2 — the money the mart holds for a dispute is `disputed_cents` and
+# `dispute_settled_cents`. §REV-10 of `docs/finance-policy.md` is the clause
+# that separates them: the claim, and the amount given up. The staging model
+# spells it out too — `settled_cents` is what was given up, not what was
+# claimed.
+#
+# DECISION 3 — the order the publish names has to separate every row of a day.
+# The mart's grain inside a day is dispute status and reason code together;
+# either on its own leaves rows sharing a place, and the file then comes out in
+# whatever order the scan gave. The ticket states the rule in words — two runs
+# of the same day may not land two different orderings — so this is a reading
+# rather than a guess.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   the model taught to carry `entity`      do_not_modify: `dbt/**`. The
+#   and `written_off_cents`                 verifier also rebuilds the mart from
+#                                           the model's own projection before it
+#                                           grades, so a re-cut model does not
+#                                           reach the steps either
+#   the check step deleted, or the          dag_structure: the task-id set is
+#   publish step deleted                    exact and the ticket says the job
+#                                           keeps the four steps it has
+#   `written_off_cents` left in the         the check tests: every name handed
+#   check because the check is green        to `assert_integer_cents` has to be
+#                                           a column the mart carries
+#   the check's column list emptied to      the check tests: the list has to
+#   make it stop naming a ghost             hold the claim and the amount given
+#                                           up
+#   the check pointed at another table      the check tests: the step still
+#   that does have a `written_off_cents`    checks the mart the job builds
+#   the publish sorted by `dispute_status`  the day tests: every graded day
+#   alone, or by `reason_code` alone, or    holds more rows than it holds
+#   by `ds`/`date_key`                      distinct values of either, and the
+#                                           first guard proves that before
+#                                           anything grades
+#   the `order_by` dropped so the publish   the day tests: with no order named,
+#   stops raising                           the file has to come out sorted by
+#                                           the grain anyway, and it does not
+#   the publish narrowed to the columns     the whole-partition test: the file
+#   finance wanted                          carries the mart's columns in the
+#                                           mart's order
+#   `open_count` rewritten as well          nothing here grades it, and CRD-140
+#                                           does. It is not convicted; it is
+#                                           work the ticket says is somebody
+#                                           else's
+#   the job or the module broken            dag_parses
+#
+# WHAT PASSES THAT IS NOT THE REFERENCE FIX, and is accepted:
+#
+#   the check handed `chargeback_cents`     it is more checking, not less. Every
+#   or `week_gmv_cents` as well             name it adds is a real money column
+#                                           of the mart
+#   the publish ordered `reason_code,       both separate every row of a day, and
+#   dispute_status`, or with `ds` or        the ticket asks for a fixed order
+#   `date_key` in front of the pair         rather than for one particular one
+#   the publish ordered by a money          a weaker answer than the grain, and
+#   column that happens to be unique on     it satisfies what the ticket asks
+#   each day                                for: every row in a place of its
+#                                           own. The order test runs the sort in
+#                                           the warehouse, so a numeric key is
+#                                           compared as a number
+#   `assert_integer_cents` changed to       a defensible fix to the silent skip,
+#   raise on a name the table has not       and it reaches five other DAGs. It
+#   got, as well as the DAG's list          passes only if the DAG's list is
+#                                           right too, because the check step
+#                                           has to run green
+#   the publish rewritten to hold its own   the order tests read the order out
+#   ORDER BY instead of naming one          of the file when the step names none
+#
+# No expected figure is authored. The verifier builds `marts.dispute_daily` from
+# `raw.disputes` and `raw.pay_meridian_settlements` with the model's own
+# projection, reads every expected result back out of it in the same session,
+# and checks each graded day for discrimination before it grades anything.
+#
+# ON THE SOLUTION AND CRD-140. Both tickets change
+# `projects/finance/dags/fin_invoice_dispute_daily.py`, and a solution is a
+# whole file, so the two cannot be applied in either order without one
+# reverting the other. This solution is the file after both have landed: it
+# carries CRD-140's `open_count` rebuild unchanged, plus this ticket's two
+# fixes. CRD-140's verifier passes against it. Nothing here grades
+# `open_count`, so a trial that leaves it alone — which is what this ticket
+# asks for — passes every check below.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# The job still imports and the bag is clean.
+- kind: dag_parses
+  dag_id: fin_invoice_dispute_daily
+
+# The four steps stay. A check that cannot be reconciled is not a check to
+# delete, and a publish that raises is not a publish to drop.
+- kind: dag_structure
+  dag_id: fin_invoice_dispute_daily
+  task_ids:
+  - build
+  - check
+  - open_count
+  - publish
+  operators:
+    build: BashOperator
+    check: PythonOperator
+    open_count: PythonOperator
+    publish: PythonOperator
+
+# The substance. See verifier/test_outputs.py: the mart as commerce's model
+# builds it, the two steps driven with their own arguments, and three days of
+# the published file.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

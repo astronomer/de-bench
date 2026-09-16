@@ -1,0 +1,13 @@
+checks:
+- kind: scoring_primitive
+  name: airflow_pin_target_aligned
+- kind: scoring_primitive
+  name: cosmos_imports_post_1_0
+- kind: scoring_primitive
+  name: cosmos_pin_uplifted
+- kind: scoring_primitive
+  name: render_config_explicit_load_mode
+- kind: scoring_primitive
+  name: project_config_explicit_install_deps
+- kind: scoring_primitive
+  name: downstream_uses_dataset_alias

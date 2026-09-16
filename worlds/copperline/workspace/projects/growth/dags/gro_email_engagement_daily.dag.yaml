@@ -1,0 +1,55 @@
+# Larkspur opens, clicks and unsubscribes, and the daily engagement mart the
+# campaign team read.
+#
+# Larkspur exports a night's events in bulk, so the file named for a day is
+# complete only once that day is over. This runs at 08:00 and owns YESTERDAY,
+# which is why every date here is `{{ macros.ds_add(ds, -1) }}` and not
+# `{{ ds }}`: a bare cron schedule makes `ds` the day the run fires.
+#
+# The partition column is a cast because Larkspur's rows carry an event
+# timestamp and no date column. The delete is still scoped to one day.
+dag_id: gro_email_engagement_daily
+schedule: "0 8 * * *"
+description: Larkspur e-mail engagement for the previous day
+start_date: 2026-01-05
+tags: [growth, email, mart, blueprint]
+default_args:
+  owner: growth
+  retries: 2
+
+steps:
+  land_events:
+    blueprint: csv_intake
+    source: "ads/dt={{ macros.ds_add(ds, -1) }}/larkspur.csv"
+    table: raw.email_events
+    mode: replace
+    partition_col: "event_time_utc::DATE"
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    columns:
+      send_id: VARCHAR
+      campaign_id: VARCHAR
+      customer_ref: VARCHAR
+      email_hash: VARCHAR
+      event_type: VARCHAR
+      event_time_utc: TIMESTAMP
+      message_id: VARCHAR
+
+  stage_events:
+    blueprint: dbt_select
+    depends_on: [land_events]
+    select: stg_customer__email_events
+
+  build_engagement:
+    blueprint: dbt_select
+    depends_on: [stage_events]
+    select: email_engagement_daily
+    vars:
+      run_date: "{{ macros.ds_add(ds, -1) }}"
+
+  publish_engagement:
+    blueprint: partition_export
+    depends_on: [build_engagement]
+    source: marts.email_engagement_daily
+    name: email_engagement
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [campaign_id]

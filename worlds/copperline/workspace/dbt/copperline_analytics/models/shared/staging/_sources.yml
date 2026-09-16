@@ -1,0 +1,303 @@
+# Every landed table the warehouse reads, and nothing else.
+#
+# One source entry per table in raw.* and ops.*. A model that reaches past this
+# file into a landed table by name has bypassed the staging layer, and the
+# staging layer is where every cast, rename and dedupe in this warehouse lives.
+# Marts read stg_ and int_. Never raw. See projects/platform/README.md, rule 1.
+#
+# Freshness is set on the fourteen feeds that arrive on a schedule somebody is
+# woken up for. The rest are reference data or one-off loads and a stale one is
+# not an incident. plat_dbt_source_freshness runs the selection hourly.
+
+version: 2
+
+sources:
+  - name: sales
+    schema: raw
+    description: >
+      The Copperline OMS. Orders, lines, the status feed, returns, promotions and the gift-card book.
+    tables:
+      - name: orders
+        description: >
+          One row per order as the OMS holds it. `order_ref` is the seven-digit customer-facing reference and it is recycled; `order_id` is the key.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 36, period: hour}
+      - name: order_lines
+        description: >
+          One row per order line. `order_line_id` is a line ordinal inside the order (L-01, L-02) and is unique only with `order_id`.
+      - name: order_status_history
+        description: >
+          Status transitions from two feeds, `oms` and `pos_replay`. Trailing 400 days only.
+      - name: returns
+        description: >
+          One row per return authorisation. `received_at` runs ahead of the order date and past today for returns in flight.
+      - name: promotions
+        description: >
+          The promotion master. `market_codes` is a comma-separated list.
+      - name: promo_applications
+        description: >
+          One row per promotion applied. A row with `order_line_id` set is a line discount; a row without one is a header discount.
+      - name: gift_cards
+        description: >
+          The card master.
+      - name: gift_card_ledger
+        description: >
+          Issue, redeem and breakage entries. Only redemptions carry an order.
+
+  - name: payments
+    schema: raw
+    description: >
+      Meridian Pay (current) and Halcyon Payments (legacy). Both fed settlements for the same payments through the migration quarter — see docs/runbooks/processor-migration.md.
+    tables:
+      - name: payment_intents
+        description: >
+          One row per payment attempt. `order_ref` is the join back to the order and it is recycled, so the attempt time matters.
+      - name: pay_meridian_settlements
+        description: >
+          Meridian's event stream. `restates_event_id` points at the event a row supersedes.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 3, period: hour}
+          error_after: {count: 8, period: hour}
+      - name: pay_halcyon_settlements
+        description: >
+          Halcyon's nightly CSV, landed with every column as text and no currency on about a third of the rows.
+      - name: merchant_regions
+        description: >
+          Which region each Halcyon merchant account belongs to. The only way to recover currency on a Halcyon row.
+
+  - name: marketplace
+    schema: raw
+    description: >
+      Copperline Marketplace: third-party sellers, their settlements and their payouts.
+    tables:
+      - name: marketplace_orders
+        description: >
+          One row per marketplace order. `order_id` here is the marketplace's own integer key and does not join raw.orders.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 36, period: hour}
+      - name: marketplace_settlements
+        description: >
+          Three lines per order — principal, commission, fulfilment fee — plus refunds.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 36, period: hour}
+      - name: marketplace_payouts
+        description: >
+          One row per seller payout.
+
+  - name: store
+    schema: raw
+    description: >
+      Northgate POS. One file per store per night, closed at 23:05 store-local.
+    tables:
+      - name: pos_sales_header
+        description: >
+          One row per till transaction. `event_time_utc` is NULL for the whole pre-cutover era — see docs/runbooks/pos-ingestion.md.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 18, period: hour}
+          error_after: {count: 48, period: hour}
+      - name: pos_sales_daily
+        description: >
+          The pre-history slab: store-day totals for the era before the header feed existed. The two do not overlap.
+      - name: pos_batch_manifest
+        description: >
+          One row per store-night file, with the row count the store claimed and the row count that arrived.
+      - name: stores
+        description: >
+          The store estate, SCD2. `is_current` marks the live row.
+
+  - name: ecommerce
+    schema: raw
+    description: >
+      The Driftwood collector. Hourly parquet, at-least-once delivery.
+    tables:
+      - name: web_events
+        description: >
+          One row per event. Duplicates by `event_id` are replays, not defects.
+        loaded_at_field: load_time
+        freshness:
+          warn_after: {count: 3, period: hour}
+          error_after: {count: 12, period: hour}
+
+  - name: inventory
+    schema: raw
+    description: >
+      Corvid WMS. A daily snapshot of the A-class SKUs, the long tail weekly, and the movement log.
+    tables:
+      - name: inventory_snapshots
+        description: >
+          Position by date, SKU and location. `unit_cost_cents` stops being sent at the FY2026 valuation change and `cost_complement_bps` starts.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 50, period: hour}
+      - name: wms_movements
+        description: >
+          One row per movement. Picks have no destination, receipts have no origin, adjustments have neither.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 50, period: hour}
+
+  - name: logistics
+    schema: raw
+    description: >
+      Carrier scan feeds and carrier invoices.
+    tables:
+      - name: shipments
+        description: >
+          One row per shipment.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 50, period: hour}
+      - name: shipment_packages
+        description: >
+          One row per package. Freight is billed at package grain, not shipment grain.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 50, period: hour}
+      - name: carrier_invoices
+        description: >
+          One invoice per carrier per month.
+      - name: lanes
+        description: >
+          The lane master: origin DC to destination region, with both timezones.
+
+  - name: marketing
+    schema: raw
+    description: >
+      The three ad platforms and the email service.
+    tables:
+      - name: ads_spend_daily
+        description: >
+          Spend and attributed orders by platform, campaign, market and day. Restated in place; `restated_at` says when.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 50, period: hour}
+      - name: email_events
+        description: >
+          Send, delivery and engagement events. `email_hash` is the only address that ever lands here.
+
+  - name: customer
+    schema: raw
+    description: >
+      The CRM, the crosswalk, and the account book that came with the acquisition.
+    tables:
+      - name: customers
+        description: >
+          The trade account master. `customer_id` is the current format; `legacy_id` is the pre-cutover one.
+      - name: customer_id_map
+        description: >
+          The E2 crosswalk, legacy id to current id. Sixty rows have no current account and stay on the legacy id.
+      - name: nwv_accounts
+        description: >
+          The Northwave book. Frozen at the acquisition and never merged — docs/runbooks/northwave-integration.md.
+
+  - name: support
+    schema: raw
+    description: >
+      The service desk.
+    tables:
+      - name: support_tickets
+        description: >
+          One row per ticket. `party_ref` is read against `party_source`: an `oms` ticket names a trade account, an `nwv` ticket names a Northwave account.
+
+  - name: product
+    schema: raw
+    description: >
+      Palette PIM. A change feed, not a snapshot.
+    tables:
+      - name: pim_product_versions
+        description: >
+          One row per change. Three sources write it and they disagree; the tie-break is pim_ui, then supplier_feed, then bulk_load.
+        loaded_at_field: received_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 72, period: hour}
+      - name: product_categories
+        description: >
+          The category tree. One root, then departments.
+
+  - name: reference
+    schema: raw
+    description: >
+      Seeds and small files. Reference data, loaded whole each time.
+    tables:
+      - name: fiscal_calendar
+        description: >
+          The 4-5-4 retail calendar, with the comparable day a year back on every row.
+      - name: market_calendar
+        description: >
+          Trading days and holidays per market, and whether a feed is expected.
+      - name: fx_rates
+        description: >
+          One rate per currency per day, in parts per million against USD.
+        loaded_at_field: published_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 72, period: hour}
+      - name: payment_terms
+        description: >
+          The terms code table, with the early-settlement discount where there is one.
+      - name: dept_cost_complement
+        description: >
+          The cost complement per department per fiscal period, from the FY2026 valuation change.
+
+  - name: finance
+    schema: raw
+    description: >
+      The trade invoicing book out of the ERP.
+    tables:
+      - name: invoices
+        description: >
+          One row per invoice. `customer_ref` may be a legacy id and needs the crosswalk before it will join.
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 50, period: hour}
+      - name: invoice_lines
+        description: >
+          Goods, plan and freight lines. Tax sits beside the line total, not inside it.
+      - name: plan_lines
+        description: >
+          Trade agreements and their terms. A cancelled plan keeps its row.
+      - name: credit_memos
+        description: >
+          Credits against an issued invoice. An adjustment to an issued invoice is a credit memo here, never a fourth line kind.
+      - name: disputes
+        description: >
+          Invoice disputes and how they landed.
+
+  - name: ops
+    schema: ops
+    description: >
+      The platform's own bookkeeping. Loaded by the ingestion jobs, not by a business feed.
+    tables:
+      - name: load_control
+        description: >
+          One row per job per business date, with the watermark it reached.
+      - name: merge_candidates
+        description: >
+          The source of record for Northwave account merges, and the only place a merge decision is written down.
+
+  - name: ops_run
+    schema: ops_run
+    description: >
+      Written by this project's own run hooks, not by a feed. `on-run-start`
+      opens a row for the invocation and `on-run-end` closes it. ops_audit_log
+      is the model over it. Nothing else may write here.
+    tables:
+      - name: dbt_run_events
+        description: >
+          Two rows per dbt invocation, `open` and `close`. An invocation with an
+          open and no close is a run that died.

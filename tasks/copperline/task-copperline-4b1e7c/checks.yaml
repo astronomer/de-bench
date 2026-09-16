@@ -1,0 +1,74 @@
+# The ticket is a build: one job, one table, one window. The work is the join,
+# and the join has two rules that nothing in the ticket states.
+#
+#   1. The crosswalk applies by the FORMAT of the reference, not by the order's
+#      date. The store integration kept writing old-format ids for two weeks
+#      after the re-key, so 45 orders inside the window are dated after it and
+#      still carry `CUST####`. A reading that switches on the date leaves 44 of
+#      them filed under an id their account stopped trading under (the 45th is
+#      itself untranslatable and resolves to the same id either way).
+#   2. Sixty legacy ids have a map row with no current account behind it. They
+#      keep the id they traded under. 206 orders in the window are theirs.
+#
+# Both rules are written down in the tree, in a runbook and in two pieces of
+# code, and the ticket names none of them. Finding them is the task.
+#
+# THE WINDOW. 2024-09-01 to 2024-12-31 holds both populations whole: all 45 late
+# old-format orders and 206 of the untranslatable ones, out of 25,456 orders
+# that carry a reference. Every one of those figures is derived from
+# `raw.orders` and `raw.customer_id_map`, and none of them is authored anywhere
+# a check reads — the verifier recomputes all of it in the same session.
+#
+# THE WRONG ANSWERS, measured against the built world, and what convicts each:
+#
+#   no crosswalk at all — the reference joined         13,314 orders carry no
+#     straight to `raw.customers`                      account. Null-account and
+#                                                      full-window tests
+#   the crosswalk gated on the order's date            44 orders on the wrong
+#     (`coalesce` kept)                                account. Late-old-format
+#                                                      test
+#   the formats read right, `m.customer_id` taken      206 orders with no
+#     without a fallback                               account. Untranslatable
+#                                                      and null-account tests
+#   the untranslatable references filtered out         206 orders missing.
+#                                                      Coverage and
+#                                                      untranslatable tests
+#   both wrong at once — gated on the date and no      44 + 205. Both tests
+#     fallback                                         name their own half
+#   staging's filters borrowed (test rows and          164 orders missing.
+#     soft-deleted rows dropped)                       Coverage test. The ticket
+#                                                      states the population in
+#                                                      so many words
+#   the resolved id written into `customer_ref` too    reference test
+#   the run's own date used as `ds`                    partition-key test
+#   a fanned-out join                                  one-row-per-order test
+#   the job named something else, or the tree broken   dag_parses
+#   nothing delivered, or a note and no job            dag_runs
+#
+# A backfill that fills MORE than the window is not convicted for it: the
+# verifier reads the table whole and compares only the orders the ticket named.
+# Filling the whole history is more work than was asked and is a defensible
+# reading of "land it once".
+#
+# COST. One graded run. The job is a one-off over a fixed window, so it needs no
+# configuration and no upstream, and nothing else is replayed.
+replay: []
+
+checks:
+
+# The job exists under the name the ticket gives it, and the tree still imports.
+- kind: dag_parses
+  dag_id: cus_crosswalk_backfill
+
+# It runs. The ticket asks for a one-off that needs no configuration, so a plain
+# trigger has to do the whole window — a job that only works when somebody types
+# two dates into it is a job support cannot ask for.
+- kind: dag_runs
+  dag_id: cus_crosswalk_backfill
+
+# The substance. See verifier/test_outputs.py: the population, the grain, the
+# partition key, and the two rules the join turns on. Every expected result is
+# computed from `raw.orders` and `raw.customer_id_map` in the same session.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900

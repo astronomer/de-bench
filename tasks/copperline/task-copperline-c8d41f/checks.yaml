@@ -1,0 +1,111 @@
+# The guard on `sc_pdi_history_complete` asks `legacy/autosys/copperline.jil`
+# what a night owed and gets a roster of thirteen. Thirteen is right one night
+# in seven.
+#
+#   the export     thirteen boxes carry `box_name: cpl.nightly.load`, and a box
+#                  name without its `cpl.` prefix is the name that job writes to
+#                  `ops.load_control` under. One of the thirteen carries its own
+#                  `date_conditions: 1` and `days_of_week: su`:
+#                  `cpl.nightly_store_targets`, whose description says the same
+#                  thing in prose. The other twelve carry no days of their own
+#                  and take the window's, which is `all`.
+#   the control    161 nights since the cutover, and the roster the export
+#     table        implies matches what the table holds on every one of them —
+#                  thirteen job names on the 23 Sundays, twelve on the other
+#                  138. Measured, not assumed. Nothing about this is planted:
+#                  `nightly_store_targets` has a seven-day cadence in the
+#                  generator and `days_of_week: su` in the export because the
+#                  two were written to agree.
+#   the overlay    takes every box under `cpl.nightly.load` and asks for all
+#                  thirteen every night, so the bracket has refused every night
+#                  but Sunday since the rewrite. It reads the right file and
+#                  misses one line of 726.
+#
+# The world ships this DAG with the older guard — "no row for this night is
+# anything but complete" — and the overlay replaces it with the roster version.
+# The solution is neither: the ticket asks for a roster the night's own weekday
+# decides, and for a night with no rows at all to be refused, which the shipped
+# guard waves through.
+#
+# WHY NOTHING RUNS THE DAG. `history_complete` shells `ssh` to a box that is not
+# in the container, so a `dag_runs` check would be red whatever the guard says
+# and would grade the network. `check_loads_finished` is plain Python over the
+# control table, and calling it is the whole question the ticket asks. There is
+# no `unchanged` check either: this DAG writes no relation, so a differential
+# over it could not fail.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   the roster left at thirteen                 verifier 1 and 3: 138 of 161
+#     (nothing changed)                         nights, and two of the four
+#                                               graded nights refuse
+#   `nightly_store_targets` dropped from the    verifier 1 (the 23 Sundays) and
+#     roster always                             verifier 2 (the no-record Sunday)
+#   the roster read back off `ops.load_control`  verifier 2: a night with no rows
+#     for the night                              owes nothing, so nothing is
+#                                                missing — measured, and it is
+#                                                the one failure that separates
+#                                                a circular roster from a real
+#                                                one
+#   the guard deleted, or made to return         verifier 4 and 5
+#     unconditionally
+#   the roster gated on the trading calendar     verifier 1: the loads run on
+#     (`calendar.is_trading_day`) rather than    Saturdays and holidays; only
+#     on the box's own days                      `nightly_store_targets` has a
+#                                               day of its own
+#   the export edited to say what the guard      do_not_modify covers `legacy/**`
+#     already assumes
+#   `due_jobs` or `check_loads_finished`         the verifier's fixture; the
+#     renamed, or moved into the house library   ticket pins both names and
+#                                               `include/lib/**` is protected
+#   the guard task deleted so the refusal        dag_structure keeps both tasks
+#     stops happening
+#   the ticket's date special-cased              none of the six graded nights is
+#     (2026-03-11)                               2026-03-11, and verifier 1 walks
+#                                                all 161
+#
+# What is NOT convicted, on purpose:
+#
+#   * `due_jobs` may hand back a list or a set, in any order — the ticket pins
+#     the name and the answer, not the type, and the verifier compares sets.
+#   * The weekly job may be found by name (`nightly_store_targets` unless the
+#     night is a Sunday) rather than by reading `days_of_week` off every box.
+#     Special-casing one job is uglier than reading the file and it is the same
+#     answer for this export, and the ticket asks for the answer.
+#   * `check_loads_finished` may return anything or nothing. Only whether it
+#     refuses is graded.
+#   * The roster for a night BEFORE the cutover is not graded. The export holds
+#     no attributes for a `delete_job` line, so it cannot say which of wave 1's
+#     nine were weekly, and `docs/runbooks/orchestrator-migration.md` says this
+#     deployment has no run history before 2026-01-05. The ticket scopes itself
+#     to the nights this deployment has run.
+#
+# The graded nights are all picked out of `ops.load_control` in the verifier's
+# own session — the first and last night of each weekday kind the estate
+# finished, the first and last it did not, and the first Sunday and Monday after
+# the table ends. None is authored and none falls in a reserved window.
+replay: []
+
+checks:
+
+# The fix imports and the bracket is still in the bag.
+- kind: dag_parses
+  dag_id: sc_pdi_history_complete
+
+# Two tasks: the guard, and the step that closes the bracket. An agent that
+# makes the refusal go away by deleting the task that refuses has not read the
+# export, and no other check here would notice.
+- kind: dag_structure
+  dag_id: sc_pdi_history_complete
+  task_ids:
+  - check_loads_finished
+  - history_complete
+  operators:
+    check_loads_finished: PythonOperator
+    history_complete: PythonOperator
+
+# The substance. See verifier/test_bracket.py — five tests, every expected job
+# name parsed out of the read-only export and every graded night picked out of
+# `ops.load_control`, both in the same session.
+- kind: pytest_verifier
+  file: test_bracket.py

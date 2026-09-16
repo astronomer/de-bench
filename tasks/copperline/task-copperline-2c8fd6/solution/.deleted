@@ -1,0 +1,7 @@
+# The coverage tie names the channel list a second time, and names the old one.
+# After the amendment the contract holds that list and plat_contracts_enforce
+# runs it every morning, so this file is one record too many. Retiring it is
+# what the 2026-04 quality memo asks for a mart test that restates a rule kept
+# somewhere else; leaving it and adding `trade` to the filter would keep two
+# records of one rule, which is how this one went stale in the first place.
+dbt/copperline_analytics/tests/commerce/tie_channel_mix_daily_channel_coverage.sql

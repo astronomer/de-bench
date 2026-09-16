@@ -1,0 +1,2 @@
+apache-airflow==2.5.0
+astronomer-cosmos==1.14.1

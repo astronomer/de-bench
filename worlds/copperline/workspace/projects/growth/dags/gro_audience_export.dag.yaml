@@ -1,0 +1,53 @@
+# Writes the day's audiences to `exports/audiences/<ds>/`, one CSV per
+# segment, for the campaign team and for anyone who wants yesterday's list
+# without a warehouse login.
+#
+# This is the file copy. The push to Beacon Ads and Tessera Social is
+# `gro_reverse_etl_ads`, which is the DAG `contracts/audience-sync.md` binds.
+# Both read the same mart and both drop a customer whose consent is not
+# current, per AS-3.
+dag_id: gro_audience_export
+schedule: "0 9 * * *"
+description: one audience CSV per segment, under exports/audiences
+start_date: 2026-01-05
+tags: [growth, audiences, export, blueprint]
+default_args:
+  owner: growth
+  retries: 2
+
+steps:
+  wait_for_segments:
+    blueprint: sensor_wait
+    asset: marts.audience_segments
+    poke_interval: 300
+    timeout: 7200
+    mode: reschedule
+
+  export_segments:
+    blueprint: export_file
+    depends_on: [wait_for_segments]
+    source: marts.audience_segments
+    directory: audiences
+    split_by: segment_id
+    columns: [segment_id, customer_id, contact_hash]
+    where: "consent_state = 'granted'"
+    order_by: [segment_id, customer_id]
+
+  segment_sizes:
+    blueprint: rollup
+    depends_on: [wait_for_segments]
+    source: marts.audience_segments
+    group_by: [segment_id]
+    agg: count_distinct
+    column: customer_id
+    as: members
+    where: "consent_state = 'granted'"
+    target: ops.audience_daily
+
+  publish_sizes:
+    blueprint: partition_export
+    depends_on: [segment_sizes]
+    source: ops.audience_daily
+    layer: ops
+    name: audience_sizes
+    order_by: [segment_id]

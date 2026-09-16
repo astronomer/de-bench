@@ -1,0 +1,170 @@
+# Two faults, one on top of the other, and only the first is fixable here.
+#
+#   The wait matches `include/data/marts/sell_through_*_<week>.csv` by name,
+#   out of `SELL_THROUGH_GLOB` in `projects/supply/lib/paths.py`. NOTHING IN
+#   THE TREE WRITES A FILE OF THAT NAME — no DAG, no model, no blueprint step,
+#   no script. `marts.sell_through_daily` is a dbt model and it has never been
+#   exported as files. The glob beside it, `SHIPPING_COST_GLOB`, does have a
+#   producer (`sc_shipping_cost_daily.export_partitions`), which is what makes
+#   this one look like it has one. So the wait has never cleared, and the DAG's
+#   own docstring, the contract's PS-3 and the registry all state the coupling
+#   as if the export existed.
+#
+#   Past the wait, `build_share` filters `p.supplier_name` on
+#   `marts.dim_product`, which carries `supplier_id` and no name.
+#   `models/shared/dims/dim_supplier.sql` says in its own docstring that there
+#   is no supplier master feed and that a supplier appears only on a PIM
+#   product version, so no table in the warehouse maps "Kestrel Outdoor" to a
+#   SKU. That one cannot be fixed from inside this repository, which is why the
+#   ticket asks for it in writing and says not to guess at it.
+#
+# The first fault is what the twenty-two seeded runs point at. The second is
+# what separates an agent that made the DAG move from one that read the query.
+#
+# WHY NOTHING HERE RUNS THE DAG
+# -----------------------------
+# Two measured reasons, not a preference.
+#
+#   1. The shipped warehouse holds `raw` and `ops` and nothing above them, so
+#      `marts.sell_through_daily` is on no tree, fixed or not, and every arm of
+#      a `dag_runs` check would grade the same red. The mart is another team's
+#      dbt build and the ticket does not ask for it.
+#   2. Proving a wait by execution costs the wait. A sensor gives up at the
+#      first poke past its deadline, so the shipped six hours is six hours of
+#      wall clock against a 1800s budget.
+#
+# So the wait is poked directly, twice, against a warehouse the verifier stands
+# a single fiscal week up in — the week the last Friday run delivers, computed
+# from `WORLD_TODAY` and the DAG's own cadence, with the rows aggregated out of
+# `raw.*` in the same session. It must clear for that run and it must not clear
+# for the run whose week is not there. See verifier/test_outputs.py; no date,
+# table or number of seconds is authored in it.
+#
+# WHAT EACH WRONG ANSWER DOES
+# ---------------------------
+#   a timeout added, or a poke interval        the wait is still on a name
+#   tuned, and the wait left on the file       nothing writes: the published-week
+#                                              poke never clears
+#   the wait pointed at another file under     the same test, for the same reason
+#   include/data/marts/
+#   a new export DAG written to write the      the ticket rules it out in words
+#   file the wait wants                        and nothing runs it, so the
+#                                              published-week poke still fails
+#   the wait deleted, or swapped for a step    dag_structure keeps the five task
+#   that always succeeds                       ids and the verifier keeps this
+#                                              one a sensor
+#   the wait moved onto the mart but asking    the unpublished-week poke: a wait
+#   only that the table exists                 that clears on a week with no rows
+#                                              would cut the share on a week that
+#                                              is not there
+#   an ExternalTaskSensor on the dbt build     the build is daily and this is
+#                                              weekly; the ticket says the wait
+#                                              is answered from the warehouse,
+#                                              and the published-week poke fails
+#                                              because no run of that DAG exists
+#   the warehouse opened by a hard-coded       CONVENTIONS.md puts every open
+#   path instead of include.lib.warehouse      inside include/lib; the verifier
+#                                              publishes the week where
+#                                              DUCKDB_PATH says, so a hard-coded
+#                                              path reads the shipped warehouse
+#                                              and finds no marts at all
+#   the week taken from date.today() rather    the same: the world's clock is not
+#   than from the run                          the container's, and CONVENTIONS
+#                                              calls that a defect in as many
+#                                              words
+#   the timeout dropped, or raised to          the ends-by-itself test: a wait
+#   Airflow's seven days                       may not outlive its own week
+#   the notifier taken off                     the pages test. Twenty-two silent
+#                                              Fridays is what is being fixed
+#   the supplier filter widened so the         the scoped test. This is the
+#   query returns rows                         largest thing that can go wrong
+#                                              here: one vendor receiving every
+#                                              supplier's sell-through
+#   SUPPLIER swapped for a supplier_id         the scoped test again — the id is
+#   somebody picked                            a guess, and the ticket says not
+#                                              to make it
+#   the PS-1 columns edited                    the columns test
+#   the registry and the lineage list left     the two document tests, which read
+#   as they were                               the C-11 rows and nothing else
+#   a house default added to                   do_not_modify: `include/lib/**`
+#   include/lib/blueprint/kinds/sensor_wait.py
+#
+# WHAT PASSES THAT IS NOT THE REFERENCE FIX, ON PURPOSE
+#   Any wait that asks the mart for the week being delivered, under any
+#   spelling: the Sunday it opens, the Saturday it closes, or all seven days.
+#   The verifier publishes the whole week, so all three clear, and no document
+#   in this world fixes which day to ask for.
+#   A poke callable written in the DAG rather than the house `table_has_partition`.
+#   Any timeout from one poke interval up to the DAG's own week.
+#   `SELL_THROUGH_GLOB` left in `projects/supply/lib/paths.py`. It is dead once
+#   nothing reads it, and tidying it is not what the ticket asked for.
+#   An asset subscription added alongside, as long as the Friday cadence PS-3
+#   fixes and the wait itself both stay.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# The file still imports. A broken import here takes nothing else with it, but
+# it is the floor under every other check.
+- kind: dag_parses
+  dag_id: sc_partner_share_kestrel
+
+# The five steps stay, and the four after the wait stay what they were.
+# Deleting the wait is the cheapest way to make a stuck DAG finish and it is the
+# one thing this ticket cannot mean; the wait's own class is left free, because
+# which kind of sensor asks the warehouse is the agent's call and the verifier
+# asks whether it is a sensor at all.
+- kind: dag_structure
+  dag_id: sc_partner_share_kestrel
+  task_ids:
+  - wait_for_sell_through
+  - build_share
+  - check_columns
+  - check_no_personal_data
+  - drop_over_sftp
+  operators:
+    build_share: PythonOperator
+    check_columns: PythonOperator
+    check_no_personal_data: PythonOperator
+    drop_over_sftp: PythonOperator
+
+# The graded decisions, all read off the rendered wait and its own answer: it is
+# still a sensor, it clears for a week that is published, it holds for one that
+# is not, it ends inside its own week, the DAG still pages, the agreed columns
+# still leave, the share still goes to one vendor, and the two documents that
+# carry this consumer say what is true. See verifier/test_outputs.py for where
+# each fact comes from — none is authored there.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 900
+
+# The find, in writing. Two patterns: the file the wait looks for, named, and
+# the fact that nothing produces it. Matching is case-insensitive and loose on
+# purpose — what is pinned is the claim, never a phrasing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(sell_through_[*<{]|SELL_THROUGH_GLOB)'
+  - '((nothing|never|no [a-z ]{0,25}(dag|job|model|script|export|producer|task|step|writer|file)s?)[^.\n]{0,160}(writ|produc|creat|export|land|generat|exist)|(no|no such)[^.\n]{0,40}(producer|writer)|(does ?n.?t|do ?n.?t|never)[^.\n]{0,40}(exist|land|arrive))'
+
+# The second fault, which is the half that separates reading the query from
+# making the DAG move. `marts.dim_product` carries `supplier_id`; the share
+# filters `supplier_name`, which is not a column of it and is not a column of
+# anything else in the warehouse either. A reply that names all three has read
+# the dimension.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'supplier_name'
+  - 'supplier_id'
+  - 'dim_product'
+
+# And who settles it. Deliberately shallow — it asks whether the reply hands the
+# open question to somebody rather than leaving it hanging, which is the third
+# thing the ticket asks for in as many words.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(supply|merch|kestrel|vendor)[^.\n]{0,140}(scope|sku list|skus|supplier_id|settle|confirm|decide|state|tell us|own)'

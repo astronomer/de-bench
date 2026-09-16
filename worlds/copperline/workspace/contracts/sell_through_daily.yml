@@ -1,0 +1,16 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/partner-share.md
+model: marts.sell_through_daily
+consumer: C-11
+owner: supply
+grain: [ds, sku, store_id]
+columns:
+  - {name: ds, type: date, required: true}
+  - {name: sku, type: string, required: true}
+  - {name: store_id, type: string, required: true}
+  - {name: store_region, type: string, required: true}
+  - {name: demand_units, type: integer, required: true}
+  - {name: net_sales_cents, type: bigint, required: true}
+tests:
+  - unique: [ds, sku, store_id]
+  - not_null: [ds, sku, store_id, store_region, demand_units, net_sales_cents]
+  - no_floats_in: [net_sales_cents]

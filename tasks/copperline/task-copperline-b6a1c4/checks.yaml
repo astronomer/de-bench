@@ -1,0 +1,89 @@
+# CUS-402 asks for two things and grades both.
+#
+# FIRST, THE NIGHTLY HAS TO FINISH. `cus_address_normalize_daily` has never
+# completed a run, and it stops three times before it reaches the end. All
+# three are loud — the run dies with the reason on the first line — and all
+# three are a house rule the world writes down:
+#
+#   1. `collect` runs `CREATE SCHEMA IF NOT EXISTS ops` unqualified.
+#      `include/lib/warehouse.py` says the read-only `nwv` attach sits first
+#      on the search path, so the CREATE lands on a read-only database and
+#      raises.
+#   2. `collect` writes a bare `NULL` for the parts neither book carries, so
+#      those columns land as integers in the `CREATE TABLE AS` and `normalize`
+#      cannot fold a string into one. The module docstring's "empty is not
+#      absent" is the rule the fix follows.
+#   3. `key_addresses` calls `warehouse.delete_insert`, which replaces a
+#      partition and does not create a table. `ops.address_keyed` is not in
+#      the warehouse, so the DELETE raises.
+#
+# SECOND, THE DIMENSION. `marts.dim_location` is one row per PLACE. The
+# acquired book carries a city and a state and nothing finer, so a lot of its
+# accounts key to one place — which is why the grain, the account counts and
+# `parts_present` are all graded, and why the ticket says the counts split by
+# book.
+#
+# Nothing here holds an authored value. Every expected result in the verifier
+# comes out of `raw.customers`, `raw.nwv_accounts` and `ops.address_keyed` in
+# the same session, and the verifier's first test refuses the day if per-place
+# and per-account happen to give the same answer.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a plan and no code       dag_runs: the run still dies
+#   the schema fixed, the NULL typing left         dag_runs: normalize raises
+#   `ops.address_keyed` never created              dag_runs: delete_insert raises
+#   the acquired leg dropped to get past the       verifier: both books are keyed
+#     typing problem                               once each
+#   a part dropped from the key, or the columns    verifier: the key is the six
+#     reordered, to make the collisions go away    parts in the fixed order
+#   a second key minted in the dimension           verifier: same test, plus the
+#     (a different hash, order or separator)       orphan check on the grain
+#   the parts written as nulls where the book      verifier: no part is absent
+#     carried nothing
+#   one row per ACCOUNT rather than per place      verifier: the grain
+#   the day appended rather than replaced          verifier: the grain, after two
+#                                                  runs at the same day
+#   the account counts taken from somewhere        verifier: the counts tie
+#     other than the accounts at the place
+#   the two book columns folded into one figure    verifier: the counts tie
+#   the DAG or the module broken                   dag_parses
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES. The ticket fixes the dimension's
+# columns and its grain and says nothing about where the code lives. A build
+# written straight into the DAG file, or into a new module beside
+# `addresses.py`, passes — and should. The same goes for the shape of the
+# repair: casting the absent parts to text and writing them as `''` land the
+# same rows, and nothing distinguishes them.
+#
+# THE GRADED DAY. 2026-05-12. It is outside the reserved windows
+# (2026-06-01..09 and 2025-08-31..2025-10-04) and the ticket does not name it.
+# `collect` gathers both books whole rather than a day of them, so no day is
+# special and the run's own date only stamps the partition.
+#
+# COST. Two runs of a five-task DAG over about 5,400 accounts, and one pytest.
+# The DAG reads `raw` only, so nothing upstream is replayed.
+replay: []
+
+checks:
+
+# The tree still imports and the DAG is still there.
+- kind: dag_parses
+  dag_id: cus_address_normalize_daily
+
+# The nightly finishes. This is the whole of the first half of the ticket:
+# three raises, each with its reason on the first line of the run.
+- kind: dag_runs
+  dag_id: cus_address_normalize_daily
+  ds: '2026-05-12'
+
+# The same day again. "A day is replaced, not added to" is a rule about the
+# second run, so the second run happens and the verifier reads what is left.
+- kind: dag_runs
+  dag_id: cus_address_normalize_daily
+  ds: '2026-05-12'
+
+# The substance. See verifier/test_outputs.py — the two books keyed once each,
+# the key's column order, the place grain, the parts and the account counts.
+- kind: pytest_verifier
+  file: test_outputs.py

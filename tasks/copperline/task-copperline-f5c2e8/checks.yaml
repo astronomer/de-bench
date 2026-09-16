@@ -1,0 +1,184 @@
+# The work is one shared intermediate model, one schema test, one clause in the
+# definitions document, and the note.
+#
+# THE SEAM. `int_customer_lifecycle` keys an order with no account onto
+# `'GUEST-' || market_code`, so every account-less order in a market lands on
+# one row. That grain is deliberate and the model's own header defends it: the
+# row is the denominator, and `agg_customer_rfm` says out loud that the
+# lifecycle model "carries the guest denominator if anybody needs it". What is
+# not deliberate is that the bucket then answers as a person. It has a first
+# order date, a tenure, a days-since-last-order and a churn flag, and because a
+# guest order lands in every market every day, the flag says the bucket has
+# never churned and never will. On the shipped warehouse those nine rows are
+# the top nine parties in the model by `orders_lifetime` — GUEST-US alone holds
+# more orders than every trade account in the book put together — and each of
+# them claims a tenure running back to the first day of the feed.
+#
+# The other half is the citation. The model's comment says the 180-day
+# threshold "lives in docs/semantic-definitions.md". That document holds no
+# churn clause, no party rule and no 180 of any kind. The only 180 in the
+# world's prose is CM-4's runbook review default, which is about runbooks. The
+# other two are in code: this model, and a tenure band in
+# `churn_scores_weekly`. So the amendment is the work the model has been
+# promising for a year, and `docs/semantic-definitions.md` § "Adding a name" is
+# the rule that asks for it.
+#
+# NOTHING IN THE VERIFIER HOLDS AN AUTHORED VALUE. It computes the bucket set
+# and every bucket's orders from `raw.orders` in the same session, under the two
+# filters `stg_sales__orders` applies, and compares them to what the model
+# publishes. The three figures in RESPONSE.md are authored and each carries its
+# derivation below.
+#
+# WHY DBT RUNS AND NO DAG DOES. The world ships the landed half of the
+# warehouse only (`AGENTS.md`, "The warehouse"), so the model does not exist
+# until dbt has made it. The prepare step builds it and its ancestors — staging
+# views plus two shared intermediates, one table at the end of the chain. The
+# nightly DAG that runs the model, `cus_customer_360_daily`, would drag the
+# whole 360 in behind it for nothing; `dag_parses` covers the tree instead.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no change    verifier: the bucket test
+#   the guest rows deleted from the model         verifier: one row per market
+#     ("no bucket, no false claim")                 and its orders
+#   a guest identity per order, so the bucket     verifier: same — the key set
+#     grain disappears                              and the counts both move
+#   `is_churned` written false on a bucket        verifier: empty, not false
+#     rather than left empty
+#   a sentinel date or a zero tenure              verifier: same
+#   the seven columns nulled for everybody        verifier: the change stopped
+#                                                   at the bucket
+#   the seven columns dropped from the model      verifier: same, and it names
+#                                                   the column that went
+#   the counts or the money nulled with them      verifier: the denominator
+#   the `not_null` on first_order_date deleted    verifier: the mutation
+#   the same test scoped to nothing, or to        verifier: the mutation
+#     `first_order_date is not null`
+#   the test turned down to a warning             file_lacks on the schema file,
+#                                                   and `dbt test` returns 0 on
+#                                                   a warn, so the mutation too
+#   the whole suite turned down in dbt_project    file_contains: +severity
+#   the model changed and the clause never        file_contains on
+#     written                                       docs/semantic-definitions.md
+#   the clause written and the model left alone   verifier
+#   the readers listed from one team's project    file_contains: the growth
+#                                                   model is one of the five
+#   the module or the tree broken                 dag_parses
+#
+# A DEFENSIBLE ALTERNATIVE THAT PASSES, and is meant to. The ticket says the
+# guest row comes back empty on the seven columns; it does not say how. A
+# `case when party_kind <> 'guest'` in the final select, the same test written
+# against `is_guest`, and a nulling join in a later CTE all grade identical.
+# The schema test may be scoped with a `where` config, replaced by a singular
+# test that makes the same assertion, or moved to a `not_null` with a
+# `config: where:` on the model — the mutation grades what the assertion
+# catches, never how it is spelt. And the definitions clause may be a table
+# row, a numbered section or a paragraph: every pattern below pins a fact or a
+# name, never a phrasing.
+#
+# WHAT IS NOT GRADED. The model has no upper bound on `order_date`, so a build
+# for a past day counts orders that had not happened yet. That is real and it is
+# not this ticket, so nothing here asserts a churn value against a recomputed
+# one — an agent who fixes the as-of window as well is not punished for it.
+
+replay: []
+
+checks:
+
+# The tree still imports and the DAG bag is still clean. The model is on the
+# critical path of the customer project's nightly 360.
+- kind: dag_parses
+  dag_id: cus_customer_360_daily
+
+# The substance. See verifier/test_outputs.py — the bucket set against the feed,
+# the seven columns empty on it, the seven columns present everywhere else, the
+# denominator still there, and a mutation that proves the schema test still
+# catches a missing first order date on a party that is not a bucket.
+- kind: pytest_verifier
+  file: test_outputs.py
+  prepare:
+  - cd dbt/copperline_analytics && /opt/dbt-venv/bin/dbt run --select +int_customer_lifecycle --profiles-dir .
+  timeout: 1200
+
+# The cheap ways to make a red test green without answering it. Only the warning
+# value and the two conditional thresholds are named, so a test that says
+# `severity: error` out loud is not convicted for being explicit.
+- kind: file_lacks
+  path: dbt/copperline_analytics/models/shared/intermediate/_intermediate_models.yml
+  patterns:
+  - "severity\\s*[=:]\\s*['\"]?warn"
+  - 'warn_if'
+  - 'error_if'
+
+# The suite-wide severity. One word under `tests:` in the project file turns all
+# 625 tests into warnings and the nightly stops meaning anything.
+- kind: file_contains
+  path: dbt/copperline_analytics/dbt_project.yml
+  matches:
+  - '\+severity:\s*error'
+
+# The clause the model has been citing. Patterns are matched case-insensitively
+# with re.search and are written loose on purpose: a table row satisfies them as
+# readily as a sentence. Each pins a fact or a name.
+#
+# None of these five appears in the shipped document. It carries no `churn`, no
+# `guest`, no `party` and no `180` — the only 180 in the world's prose is CM-4's
+# runbook review default — so every one of them is new work.
+- kind: file_contains
+  path: docs/semantic-definitions.md
+  matches:
+  # The name being defined.
+  - 'is_churned'
+  # The threshold, as a number of days.
+  - '\b180\b[^0-9\n]{0,25}days?'
+  # What the 180 days are counted back from. The model reads `var('ds')` and
+  # reads no clock, so any of the ways a writer names that date is taken.
+  - "(run[ -]?date|var\\(\\s*['\"]ds['\"]\\s*\\)|\\bds\\b|as[ -]of|wall clock|the date the build)"
+  # The grain, and the three kinds. The ticket says "the kinds of party the
+  # model publishes" and never names them, so naming all three is read off the
+  # model rather than off the ticket.
+  - '\bpart(y|ies)\b'
+  - 'trade'
+  - 'loyalty'
+  # The guest rule, in either order.
+  - "(guest[^\\n]{0,200}(churn|empty|null|none|no |not |never)|(churn|empty|null|no churn)[^\\n]{0,200}guest)"
+
+# The note. Three facts, each pinning a figure or a named thing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # How many rows are buckets. Nine, one per market that has ever taken an
+  # order naming nobody: US, GB, DE, CA, IE from the first day of the feed, and
+  # BR, MX, ID, PL from 2026-02-01. Derived from the shipped warehouse —
+  # `select count(distinct market_code) from raw.orders where not
+  # coalesce(is_test,false) and deleted_at is null and customer_ref is null and
+  # loyalty_id is null` — and the verifier re-measures the same set every run,
+  # so a rebuild that moved it would fail there first rather than here.
+  - '(\b(nine|9)\b[^0-9\n]{0,60}(guest|bucket|market|row)|(guest|bucket|market)[^0-9\n]{0,60}\b(nine|9)\b)'
+  # The orders on them. 515,617 by the same query with `count(*)`. The comma is
+  # optional and a space is allowed, because a writer may format it either way.
+  - '\b515[,\s]?617\b'
+  # Every model that reads it, and the fifth one is growth's. `docs/lineage.md`
+  # lists readers of marts only and this is an `int` model, so the list comes
+  # from the `ref`s: four in models/customer/ and one in models/growth/. An
+  # agent that works only inside the team that owns the ticket produces four.
+  - 'dim_customer'
+  - 'agg_customer_rfm'
+  - 'agg_cohort_retention'
+  - 'churn_scores_weekly'
+  - 'audience_segments'
+  # Whether their numbers move. They do not: every one of the five filters to
+  # `party_kind = 'trade'` or joins `party_key` to a resolved `customer_key`,
+  # which a `GUEST-` key never matches, so no guest row has ever reached a
+  # published mart. The pattern takes any way of saying nothing moves — the
+  # negation may sit on either side of the verb ("no numbers move" and "Do its
+  # numbers move? No" both count), and "unmoved" says it in one word.
+  # Affirmative on purpose: with 90-character windows the words "no" and
+  # "move" co-occur in the opposite finding too — "no reader filters the
+  # buckets out today, so all five aggregates will move" matched the old
+  # pattern. The negator now has to sit against the noun it negates, or the
+  # answer form ("move? No"), or the one-word verdicts, or a No in the moves
+  # column of a table.
+  - '(\b(nobody.?s?|no ?one.?s?|nothing|none|not one|no)\b\s+(of\s+\w+\s+)?(the |their |these |those )?(numbers?|figures?|totals?|readers?|models?|marts?|aggregates?|downstream)?\s*(numbers?\s*)?\b(move|moves|moved|change|changes|differ|differs|shift|shifts)\b|\b(move|moves|change|changes|differ|differs)\b\s*\??\s*[:—\-|]{0,2}\s*\b(no|none|nothing)\b(?=[\s.,;:)\]|]|$)|\bunmoved\b|moves?\?[\s\S]{0,600}\|\s*(no|none)\s*\|)'
+  # The rule, restated. The threshold has to sit against the thing it measures.
+  - '\b180\b[^0-9\n]{0,25}days?'

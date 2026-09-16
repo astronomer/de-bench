@@ -1,0 +1,16 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/daily-flash.md
+model: marts.comp_sales_daily
+consumer: C-5
+owner: finance
+grain: [ds, region]
+columns:
+  - {name: ds, type: date, required: true}
+  - {name: region, type: string, required: true}
+  - {name: comp_sales_cents, type: bigint, required: true}
+  - {name: comp_sales_cents_ly, type: bigint, required: false}
+  - {name: comp_date_ly, type: date, required: true}
+  - {name: comp_store_count, type: integer, required: true}
+tests:
+  - unique: [ds, region]
+  - not_null: [ds, region, comp_sales_cents, comp_date_ly]
+  - no_floats_in: [comp_sales_cents, comp_sales_cents_ly]

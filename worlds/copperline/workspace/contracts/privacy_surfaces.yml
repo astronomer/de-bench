@@ -1,0 +1,23 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/privacy.md
+# Not a mart schema: this consumer's subject is the list of surfaces a deletion
+# must reach, so the schema enumerates the list and enforcement checks that the
+# sweep reported every one of them.
+consumer: C-12
+owner: platform
+request_source: ops/privacy/deletion_requests.csv
+surfaces:
+  - {id: customers, kind: table, path: raw.customers}
+  - {id: nwv_accounts, kind: table, path: raw.nwv_accounts}
+  - {id: dim_customer, kind: table, path: marts.dim_customer}
+  - {id: customer_360, kind: table, path: marts.customer_360}
+  - {id: support_tickets, kind: table, path: raw.support_tickets}
+  - {id: deleted_rows, kind: table, path: audit.deleted_rows}
+  - {id: feature_exports, kind: files, path: exports/features/}
+  - {id: audience_files, kind: files, path: exports/audiences/}
+  - {id: partner_share, kind: files, path: exports/partner_share/}
+  - {id: service_desk, kind: files, path: exports/service_desk/}
+  - {id: landing_live, kind: files, path: landing/}
+tests:
+  - every_surface_reported: true
+  - receipt_written: true
+  - aggregates_not_rebuilt: true

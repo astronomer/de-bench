@@ -1,0 +1,14 @@
+sla_monitored:
+  default_args:
+    start_date: 2025-01-01
+    sla_sec: 3600
+  schedule_interval: '@daily'
+  sla_miss_callback: dags.callbacks.sla_alerts.notify_pagerduty
+  tasks:
+    extract:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo extract
+    transform:
+      operator: airflow.providers.standard.operators.bash.BashOperator
+      bash_command: echo transform
+      dependencies: [extract]

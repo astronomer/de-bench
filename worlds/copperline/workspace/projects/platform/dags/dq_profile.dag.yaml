@@ -1,0 +1,56 @@
+# Row counts per mart, every day at noon, into ops.profile_daily.
+#
+# It is the cheapest question worth asking of a warehouse: is each mart about
+# the size it was yesterday. It answers nothing on its own — the alerting DAG
+# in projects/growth/ is what pages — but it is the record somebody reads when
+# a number moved and nobody can say when.
+#
+# `table_profile` is this team's own blueprint kind and lives in kinds.py
+# beside this file.
+
+dag_id: plat_dq_profile
+schedule: "0 12 * * *"
+description: row counts per mart into ops.profile_daily
+tags: [platform, quality, ops]
+
+default_args:
+  owner: platform
+  retries: 2
+
+steps:
+  wait_for_marts:
+    blueprint: sensor_wait
+    asset: marts.order_economics
+    partition_col: order_date
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    poke_interval: 300
+    timeout: 10800
+    mode: reschedule
+
+  profile:
+    blueprint: table_profile
+    depends_on: [wait_for_marts]
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    target: ops.profile_daily
+    tables:
+      - marts.order_economics
+      - marts.daily_revenue
+      - marts.comp_sales_daily
+      - marts.gmv_daily
+      - marts.account_rollup
+      - marts.inventory_position
+      - marts.sell_through_daily
+      - marts.settlement_weekly
+      - marts.customer_360
+      - marts.dim_customer
+      - marts.audience_segments
+      - marts.feature_customer_daily
+
+  publish:
+    blueprint: partition_export
+    depends_on: [profile]
+    source: ops.profile_daily
+    layer: ops
+    name: profile_daily
+    partition_value: "{{ macros.ds_add(ds, -1) }}"
+    order_by: [table_name]

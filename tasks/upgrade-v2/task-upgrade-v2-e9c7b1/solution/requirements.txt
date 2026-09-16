@@ -1,0 +1,5 @@
+apache-airflow-providers-google>=20.0.0
+apache-airflow-providers-cncf-kubernetes>=10.0.0
+apache-airflow-providers-postgres>=6.0.0
+apache-airflow-providers-standard>=1.0.0
+pandas>=2.0.0

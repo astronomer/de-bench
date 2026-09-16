@@ -1,0 +1,16 @@
+# Enforced by plat_contracts_enforce. Prose contract: contracts/settlement-summary.md
+model: marts.settlement_weekly
+consumer: C-3
+owner: commerce
+grain: [week_start, seller_id]
+columns:
+  - {name: week_start, type: date, required: true}
+  - {name: seller_id, type: string, required: true}
+  - {name: gmv_cents, type: bigint, required: true}
+  - {name: commission_cents, type: bigint, required: true}
+  - {name: fee_cents, type: bigint, required: true}
+  - {name: payout_cents, type: bigint, required: true}
+tests:
+  - unique: [week_start, seller_id]
+  - not_null: [week_start, seller_id, gmv_cents, commission_cents, fee_cents, payout_cents]
+  - no_floats_in: [gmv_cents, commission_cents, fee_cents, payout_cents]

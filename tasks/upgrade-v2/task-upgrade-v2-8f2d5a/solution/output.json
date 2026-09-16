@@ -1,0 +1,5 @@
+{
+  "incompatible": true,
+  "resolution": "airflow_bump",
+  "notes": "cncf-kubernetes 10.x requires apache-airflow>=2.8; AF 2.7.3 falls below the floor. Bumping Airflow to 2.8+ (or downgrading the provider to the 9.x line) resolves the conflict."
+}

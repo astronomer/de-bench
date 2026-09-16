@@ -1,0 +1,27 @@
+name: 'northwave_reporting'
+version: '2.4.1'
+config-version: 2
+
+profile: 'northwave'
+
+source-paths: ["models"]
+analysis-paths: ["analysis"]
+macro-paths: ["macros"]
+data-paths: ["data"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets:
+    - "target"
+    - "dbt_modules"
+
+models:
+    northwave_reporting:
+        materialized: table
+        staging:
+            materialized: view
+        marts:
+            materialized: table
+        legacy:
+            materialized: table
+            enabled: true

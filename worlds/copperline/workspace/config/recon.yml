@@ -1,0 +1,29 @@
+# What fin_ledger_tie ties against. Read at parse time by the DAG.
+#
+# The subject table is assembled from the three keys below rather than written
+# out, which is a leftover from when the tie ran over four subjects and the DAG
+# was rendered once per subject. One subject survived.
+
+schema: marts
+subject: order
+grain: economics
+
+# The ledger the marts are measured against. REV-9 in docs/finance-policy.md:
+# a published monthly figure for a closed month equals the ledger to the cent,
+# per entity.
+ledger: raw.finance_ledger
+
+# Where a break is written. One row per subject, per entity, per fiscal month.
+breaks: ops.tie_breaks
+
+# A break under this many cents is recorded and not raised. It exists because
+# the first month of the tie raised on a two-cent rounding difference in an
+# entity with eleven rows, and finance asked for a floor rather than a nightly
+# page. REV-9 still says the tie is to the cent, so the floor is for the alert
+# and never for the published figure.
+tolerance_cents: 50
+
+# Entities with no ledger coverage before the month they began trading. A tie
+# over a period that predates the entity has nothing to tie to, and that is not
+# a break. docs/finance-policy.md lists the five and their first closed month.
+skip_before_first_close: true

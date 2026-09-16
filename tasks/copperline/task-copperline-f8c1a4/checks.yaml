@@ -1,0 +1,160 @@
+# Two defects, both shipped in the world and neither planted.
+#
+# THE WINDOW. `week_bounds(ds)` in
+# `projects/commerce/dags/payment_settlement_weekly.py` is
+# `(calendar.week_start(ds - 1), ds - 1)`. A fiscal week opens on a Sunday, the
+# DAG is scheduled `0 5 * * 1`, and `CONVENTIONS.md` "Dates" makes `ds` the day
+# the run FIRES — so on every scheduled run `ds - 1` is the Sunday that opens
+# the new week, `week_start` returns that Sunday, and start and end come back
+# the same date. The window is one day where the DAG's own docstring and
+# `contracts/settlement-summary.md` SS-1 and SS-3 both say seven. Every
+# marketplace payout falls on a Monday, so the one day it holds is the one day
+# of the week that never carries a payout: the run summarises nothing.
+#
+# THE TIE. `projects/commerce/sql/settlement_payout_tie.sql` closes the summary
+# side on one `week_start` and opens the payout side at that same date with
+# nothing above it, so it compares one week's summary against every payout from
+# that week onwards. It cannot balance whatever the summary holds, which is why
+# `tie_to_payouts` is the step the seeded runs die on. The upper bound has to
+# reach the statement, so the call site passes the end of the week too.
+#
+# WHY A VERIFIER AND NOT A RUN. `AGENTS.md`, "The warehouse": the world ships
+# the landed half only, so `staging.*` and `marts.*` are not on disk. This DAG
+# cannot build them here either — `apply_fee_schedule` reads
+# `staging.fee_schedule` and no job in this tree writes it — so `airflow dags
+# test payment_settlement_weekly` stops at the fee step however the window is
+# repaired. The ticket says so and puts the fee step out of scope. The verifier
+# stands up the two schemas and the one mart table and drives the three steps
+# the ticket names, which grades the same code in seconds.
+#
+# NOTHING HERE HOLDS AN AUTHORED VALUE. The verifier reads the week a run owns
+# out of `raw.fiscal_calendar` and the figures out of
+# `raw.marketplace_settlements` and `raw.marketplace_payouts`, in the same
+# session. The two graded run dates, 2026-03-09 and 2026-05-11, are Mondays
+# nine weeks apart, named nowhere in the ticket, both inside the world's graded
+# regions and outside the reserved window and the never-grade tail.
+#
+# THE WRONG ANSWERS, and what convicts each:
+#
+#   nothing delivered, or a note and no code change   verifier: the empty week
+#   the fee schedule "fixed", or the fee step         verifier: the tie tests;
+#     rewritten                                       dag_structure
+#   the tie step deleted, or its comparison dropped   dag_structure; verifier:
+#                                                     the tie returns the week's
+#                                                     paid total or nothing
+#   the tie made to pass by widening the summary      verifier: both weeks in the
+#     side to match the unbounded payout side         mart at once
+#   the window widened with weekday arithmetic        verifier: the window has to
+#     (`ds - 7` to `ds - 1`, Monday to Sunday)        be a fiscal week the
+#                                                     calendar authors
+#   the window moved to the week `ds` sits in, which  verifier: the graded weeks
+#     on a Monday has not closed yet                  are the closed ones
+#   the Monday mended with a special case             verifier: the shape test,
+#                                                     on a Thursday, a Sunday and
+#                                                     a Saturday
+#   a week hard-coded, or March special-cased         verifier: 2026-05-11
+#   `include/lib/calendar.py` "fixed" instead of the  do_not_modify; the calendar
+#     call site                                       is right and every other
+#                                                     weekly job depends on it
+#   the DAG or the statement broken                   dag_parses
+#   "the fee schedule was stale"                      file_contains: the fee
+#                                                     schedule has to be ruled
+#                                                     out, with a reason
+#
+# DEFENSIBLE ALTERNATIVES THAT PASS, and should.
+#
+#   A mid-week `ds` is not pinned to a week. For a Monday `ds` the readings all
+#   agree — the fiscal week that closed, the seven days the contract names, and
+#   the house pattern the other weekly jobs use (`sc_shrink_weekly`,
+#   `sc_supplier_scorecard_weekly`: a lag in days from the run day, then the
+#   calendar's week). Off the schedule they diverge by a week, and the DAG does
+#   not run off the schedule, so mid-week dates are asked for the shape of the
+#   window and never for which week it is.
+#
+#   The publish is not graded. `settlement_publish.sql` is a bare INSERT and
+#   that is LF-1042's ticket, not this one: the verifier clears the mart before
+#   each week it publishes, so a reply that repairs the append as well is
+#   measured the same as one that leaves it. Either way this task's tests read
+#   one run of a week.
+#
+#   Both ends of the window may come from `week_start`/`week_end` or from
+#   `week_start` and six days on. A fiscal week is seven days in both, and the
+#   calendar agrees with either.
+replay: []
+
+checks:
+
+# The tree still imports, and the DAG is still there.
+- kind: dag_parses
+  dag_id: payment_settlement_weekly
+
+# The seven steps, which the ticket says stay as they are. This is the guard
+# against passing by deletion: dropping `tie_to_payouts` because it is the step
+# that is red, or dropping `apply_fee_schedule` because it is the step blamed
+# for it, changes the DAG's contract with everything downstream.
+- kind: dag_structure
+  dag_id: payment_settlement_weekly
+  task_ids:
+  - build_week
+  - apply_processor_boundary
+  - apply_fee_schedule
+  - publish_week
+  - check_grain
+  - tie_to_payouts
+  - export_summary
+  operators:
+    build_week: PythonOperator
+    apply_processor_boundary: PythonOperator
+    apply_fee_schedule: PythonOperator
+    publish_week: PythonOperator
+    check_grain: PythonOperator
+    tie_to_payouts: PythonOperator
+    export_summary: PythonOperator
+
+# The substance. See verifier/test_outputs.py — the window against the calendar,
+# the week against the remittance, and the tie against the week it names.
+- kind: pytest_verifier
+  file: test_outputs.py
+
+# The note commerce asked for. Patterns are matched case-insensitively with
+# re.search and are written loose on purpose: each pins a named thing or a
+# fact, never a phrasing.
+
+# What the run covered. One day, and the day it was: the Sunday that opens the
+# week rather than the week that closed. A reply that says "the window was
+# wrong" and stops has not told seller-ops anything.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(week_bounds|the window|its window)'
+  - '(one day|1 day|single day|one[- ]day|a day long|start (and|==|=) end|same (date|day)|only the sunday|just the sunday)'
+  - '\bsunday'
+
+# Why one day was fatal rather than merely short: the day it held is the day of
+# the week with no payout on it. This is the half of the find that needs the
+# data and not just the code.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(payouts?[^\n]{0,80}monday|monday[^\n]{0,60}payouts?|payout_date[^\n]{0,60}monday)'
+  - '(empty|nothing|no rows|no lines|no settlements?|no payouts?|nought|zero)'
+
+# Which days it should have covered, and where that comes from. The answer is a
+# fiscal week — seven days, Sunday to Saturday — and the calendar authors it.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(fiscal week|fiscal_calendar|retail-calendar|settlement-summary|SS-[13])'
+  - '(seven days|7 days|sunday (to|through|until|-|—|–) saturday|whole week|full week|week that closed|closed week)'
+
+# The fee schedule, ruled out with a reason. Three patterns because a verdict
+# with no reason behind it is a guess: name the suspect, give the fact that
+# clears it, and say it is cleared. The fact is the tie's own shape — one side
+# bounded to a week, the other open from that week onwards — and any way of
+# saying it does.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(fee schedule|apply_fee_schedule|settlement_fees|stale rates?|the rates)'
+  - '(no upper bound|no end|unbounded|open[- ]ended|nothing above|not bounded|only a lower bound|never closes|open at the top|every payout[^\n]{0,60}(since|after|onwards?|from|later)|all payouts[^\n]{0,40}(since|after|from)|every week (since|after|from)|payout_date *>=)'
+  - '(not the cause|not what|not this|ruled? (it )?out|rules? it out|innocent|not to blame|cannot (be|have)|nothing to do with|unrelated|clears? it|is not the fee|not the fee)'

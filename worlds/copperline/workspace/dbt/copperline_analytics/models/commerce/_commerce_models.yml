@@ -1,0 +1,216 @@
+# Tests on commerce's marts.
+#
+# QC-1: a mart tests the rules its consumers' contracts state — grain, required
+# columns, the accepted values a contract pins, and any total a contract commits
+# to. Dimension keys are tested for integrity here because a fact that points at
+# a dimension row that is not there produces a silent undercount in every
+# report built on it.
+#
+# The reconciliation ties are singular tests under tests/commerce/.
+
+version: 2
+
+models:
+
+  - name: dim_product
+    description: Conformed dimension, built by commerce. See the model header.
+    columns:
+      - name: product_key
+        tests: [unique, not_null]
+      - name: sku
+        tests: [unique, not_null]
+      - name: status
+        tests:
+          - accepted_values:
+              values: ['active', 'discontinued']
+
+  - name: fct_order
+    description: The published order spine.
+    columns:
+      - name: order_key
+        tests: [unique, not_null]
+      - name: date_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: channel_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_channel')
+              field: channel_key
+      - name: geography_key
+        tests:
+          - relationships:
+              to: ref('dim_geography')
+              field: geography_key
+      - name: store_key
+        tests:
+          - relationships:
+              to: ref('dim_store')
+              field: store_key
+      - name: currency_key
+        tests:
+          - relationships:
+              to: ref('dim_currency')
+              field: currency_key
+      - name: booked_cents
+        tests: [not_null]
+      - name: net_sales_cents
+        tests: [not_null]
+      - name: processor
+        tests:
+          - accepted_values:
+              values: ['meridian', 'halcyon', 'both', 'none']
+
+  - name: fct_order_line
+    columns:
+      - name: order_line_key
+        tests: [unique, not_null]
+      - name: order_id
+        tests: [not_null]
+      - name: date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: product_key
+        description: NULL where the SKU is not in the catalog, which is most rows.
+        tests:
+          - relationships:
+              to: ref('dim_product')
+              field: product_key
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: fct_payments
+    columns:
+      - name: order_key
+        tests: [unique, not_null]
+      - name: settled_net_cents
+        tests: [not_null]
+      - name: processor
+        tests:
+          - accepted_values:
+              values: ['meridian', 'halcyon', 'both', 'none']
+
+  - name: fct_returns
+    columns:
+      - name: return_key
+        tests: [unique, not_null]
+      - name: refund_cents
+        tests: [not_null]
+      - name: refund_method
+        tests:
+          - accepted_values:
+              values: ['original', 'gift_card', 'store_credit']
+
+  - name: agg_daily_product_sales
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: agg_daily_store_sales
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, store_id]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: store_key
+        tests:
+          - relationships:
+              to: ref('dim_store')
+              field: store_key
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: order_economics
+    description: contracts/order_economics.yml, consumer C-4.
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: order_date
+        tests: [not_null]
+      - name: booked_cents
+        tests: [not_null]
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: channel_mix_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, channel_key, geography_key]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: channel_key
+        tests:
+          - relationships:
+              to: ref('dim_channel')
+              field: channel_key
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: gmv_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, seller_id, currency_key]
+    columns:
+      - name: gmv_cents
+        tests: [not_null]
+      - name: commission_cents
+        tests: [not_null]
+
+  - name: settlement_weekly
+    description: contracts/settlement_weekly.yml, consumer C-3.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [week_start, seller_id]
+    columns:
+      - name: week_start
+        tests: [not_null]
+      - name: seller_id
+        tests: [not_null]
+      - name: gmv_cents
+        tests: [not_null]
+      - name: commission_cents
+        tests: [not_null]
+      - name: fee_cents
+        tests: [not_null]
+      - name: payout_cents
+        tests: [not_null]
+
+  - name: cart_abandon_daily
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: session_count
+        tests: [not_null]
+
+  - name: dispute_daily
+    columns:
+      - name: ds
+        tests: [not_null]
+
+  - name: recon_exceptions
+    columns:
+      - name: exception_key
+        tests: [unique, not_null]
+      - name: check_name
+        tests:
+          - accepted_values:
+              values:
+                - pos_variance
+                - shadow_quarter
+                - ambiguous_payment
+                - gift_card_applied
+                - unsettled_marketplace
+                - commission_variance

@@ -1,0 +1,676 @@
+# Tests on the staging layer.
+#
+# QC-1 (docs/memos/2026-04-quality-contract-revision.md): a staging model tests
+# the uniqueness of its key and non-null on the columns the source guarantees.
+# Shape only. The source is what it is; staging says what arrived.
+#
+# Several tests below predate that memo and QC-3 says an old test is stale until
+# it has been re-derived from QC-1. They are still here because nobody has
+# worked the list.
+
+version: 2
+
+models:
+
+  # ---------------------------------------------------------------- sales (S1)
+
+  - name: stg_sales__orders
+    description: One row per order the OMS holds, less test orders and deletions.
+    columns:
+      - name: order_id
+        description: The key. Never recycled.
+        tests: [unique, not_null]
+      - name: order_ref
+        description: >
+          The customer-facing reference. Recycled about every fifty days, so it
+          is not a key and is not tested as one — QC-2 retired that test.
+        tests: [not_null]
+      - name: order_date
+        tests: [not_null]
+      - name: channel
+        tests:
+          - not_null
+      - name: market_code
+        tests: [not_null]
+      - name: grand_total_cents
+        tests: [not_null]
+      - name: subtotal_cents
+        tests: [not_null]
+
+  - name: stg_sales__order_lines
+    description: One row per order line. Keyed on (order_id, line_no).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [order_id, line_no]
+    columns:
+      - name: order_line_key
+        tests: [unique, not_null]
+      - name: order_id
+        tests: [not_null]
+      - name: line_no
+        tests: [not_null]
+      - name: line_total_cents
+        tests: [not_null]
+      - name: sku
+        tests: [not_null]
+
+  - name: stg_sales__order_status_history
+    description: Status transitions, deduped per order, transition and feed.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [order_id, from_status, to_status, feed]
+    columns:
+      - name: status_change_key
+        tests: [unique, not_null]
+      - name: order_id
+        tests: [not_null]
+      - name: changed_at
+        tests: [not_null]
+      - name: feed
+        tests:
+          - not_null
+
+  - name: stg_sales__returns
+    columns:
+      - name: rma_id
+        tests: [unique, not_null]
+      - name: order_id
+        tests: [not_null]
+      - name: refund_cents
+        tests: [not_null]
+      - name: initiated_date
+        tests: [not_null]
+
+  - name: stg_sales__promotions
+    columns:
+      - name: promo_id
+        tests: [unique, not_null]
+      - name: promo_code
+        tests: [not_null]
+      - name: starts_on
+        tests: [not_null]
+      - name: ends_on
+        tests: [not_null]
+
+  - name: stg_sales__promo_applications
+    columns:
+      - name: application_id
+        tests: [unique, not_null]
+      - name: order_id
+        tests: [not_null]
+      - name: promo_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_sales__promotions')
+              field: promo_id
+      - name: discount_cents
+        tests: [not_null]
+
+  # -------------------------------------------------------- gift cards (S12)
+  #
+  # Three tests in this block fail on the shipped tree. All three were written
+  # before the April 2026 memo and all three are the shapes QC-2 retires: an
+  # accepted_values list on a source status column, and a not_null on a column
+  # the source may omit. QC-3 applies.
+
+  - name: stg_sales__gift_cards
+    columns:
+      - name: card_id
+        tests: [unique, not_null]
+      - name: initial_cents
+        tests: [not_null]
+      - name: issued_date
+        tests: [not_null]
+      - name: status
+        description: The card's state as the issuing system reports it.
+        tests:
+          - accepted_values:
+              values: ['active', 'redeemed', 'void']
+      - name: jurisdiction_code
+        tests: [not_null]
+
+  - name: stg_sales__gift_card_ledger
+    columns:
+      - name: entry_id
+        tests: [unique, not_null]
+      - name: card_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_sales__gift_cards')
+              field: card_id
+      - name: amount_cents
+        tests: [not_null]
+      - name: entry_type
+        tests:
+          - accepted_values:
+              values: ['issue', 'redeem', 'reload', 'adjust']
+      - name: order_id
+        description: The order a redemption paid for.
+        tests: [not_null]
+
+  # ------------------------------------------------------------- payments (S2)
+
+  - name: stg_payments__payment_intents
+    columns:
+      - name: intent_id
+        tests: [unique, not_null]
+      - name: order_ref
+        description: >
+          Recycled across retries. QC-2 retired the uniqueness test that used to
+          sit here and replaced it with the one on intent_id.
+        tests: [not_null]
+      - name: outcome
+        tests:
+          - not_null
+
+  - name: stg_payments__meridian_settlements
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+      - name: intent_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_payments__payment_intents')
+              field: intent_id
+      - name: amount_cents
+        tests: [not_null]
+      - name: event_type
+        tests: [not_null]
+
+  - name: stg_payments__halcyon_settlements
+    columns:
+      - name: txn_id
+        tests: [unique, not_null]
+      - name: order_ref
+        tests: [not_null]
+      - name: amount_cents
+        tests: [not_null]
+      - name: merchant_acct
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_payments__merchant_regions')
+              field: merchant_acct
+
+  - name: stg_payments__merchant_regions
+    columns:
+      - name: merchant_acct
+        tests: [unique, not_null]
+      - name: region_code
+        tests: [not_null]
+
+  # ---------------------------------------------------------- marketplace (S2c)
+
+  - name: stg_marketplace__orders
+    columns:
+      - name: marketplace_order_id
+        tests: [unique, not_null]
+      - name: seller_id
+        tests: [not_null]
+      - name: gmv_cents
+        tests: [not_null]
+      - name: placed_date
+        tests: [not_null]
+
+  - name: stg_marketplace__settlements
+    columns:
+      - name: settlement_id
+        tests: [unique, not_null]
+      - name: marketplace_order_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_marketplace__orders')
+              field: marketplace_order_id
+      - name: amount_cents
+        tests: [not_null]
+      - name: line_type
+        tests: [not_null]
+
+  - name: stg_marketplace__payouts
+    columns:
+      - name: payout_id
+        tests: [unique, not_null]
+      - name: seller_id
+        tests: [not_null]
+      - name: net_paid_cents
+        tests: [not_null]
+
+  # ---------------------------------------------------------------- store (S3)
+
+  - name: stg_store__pos_sales_header
+    columns:
+      - name: pos_txn_id
+        tests: [unique, not_null]
+      - name: store_id
+        tests: [not_null]
+      - name: business_date
+        description: The store's own trading day, closed 23:05 store-local.
+        tests: [not_null]
+      - name: net_cents
+        tests: [not_null]
+
+  - name: stg_store__pos_sales_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [store_id, business_date]
+    columns:
+      - name: store_id
+        tests: [not_null]
+      - name: business_date
+        tests: [not_null]
+      - name: net_cents
+        tests: [not_null]
+
+  - name: stg_store__pos_batch_manifest
+    columns:
+      - name: batch_id
+        tests: [unique, not_null]
+      - name: store_id
+        tests: [not_null]
+      - name: business_date
+        tests: [not_null]
+
+  - name: stg_store__stores
+    description: SCD2. One row per store per version.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [store_id, valid_from]
+    columns:
+      - name: store_id
+        tests: [not_null]
+      - name: market_code
+        tests: [not_null]
+      - name: tz_name
+        tests: [not_null]
+      - name: opened_on
+        tests: [not_null]
+
+  # ------------------------------------------------------------ ecommerce (S4)
+
+  - name: stg_ecommerce__web_events
+    description: Deduped on event_id; the earliest arrival wins.
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+      - name: session_id
+        tests: [not_null]
+      - name: event_name
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['page_view', 'product_view', 'add_to_cart', 'checkout_start', 'purchase']
+      - name: event_time_utc
+        tests: [not_null]
+
+  # ------------------------------------------------------------ inventory (S6a)
+  #
+  # Four tests in this block fail on the shipped tree. All four predate the
+  # April 2026 memo. Two are relationships from staging to a dimension, which
+  # QC-2 retires and re-places at int_; one is a not_null on a column the source
+  # stopped sending at the FY2026 valuation change, which QC-2 names outright;
+  # one is a not_null on a column the source omits by the shape of the row.
+
+  - name: stg_inventory__snapshots
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [snapshot_date, sku, location_id]
+    columns:
+      - name: snapshot_date
+        tests: [not_null]
+      - name: sku
+        description: The merchandising code, not the catalog key.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_product')
+              field: sku
+      - name: location_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_warehouse')
+              field: location_id
+      - name: on_hand_units
+        tests: [not_null]
+      - name: unit_cost_cents
+        description: Stated cost per unit, as the WMS sends it.
+        tests: [not_null]
+
+  - name: stg_inventory__wms_movements
+    columns:
+      - name: movement_id
+        tests: [unique, not_null]
+      - name: sku
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_product')
+              field: sku
+      - name: occurred_at
+        tests: [not_null]
+      - name: movement_type
+        tests: [not_null]
+      - name: from_location
+        description: Where the units left.
+        tests: [not_null]
+
+  # ------------------------------------------------------------ logistics (S6b)
+
+  - name: stg_logistics__shipments
+    columns:
+      - name: shipment_id
+        tests: [unique, not_null]
+      - name: order_id
+        tests: [not_null]
+      - name: carrier_code
+        tests: [not_null]
+      - name: lane_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_logistics__lanes')
+              field: lane_id
+      - name: ship_date
+        tests: [not_null]
+
+  - name: stg_logistics__shipment_packages
+    columns:
+      - name: package_id
+        tests: [unique, not_null]
+      - name: shipment_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_logistics__shipments')
+              field: shipment_id
+      - name: billed_cents
+        tests: [not_null]
+      - name: total_freight_cents
+        tests: [not_null]
+
+  - name: stg_logistics__carrier_invoices
+    columns:
+      - name: carrier_invoice_id
+        tests: [unique, not_null]
+      - name: carrier_code
+        tests: [not_null]
+      - name: total_cents
+        tests: [not_null]
+      - name: period_start
+        tests: [not_null]
+
+  - name: stg_logistics__lanes
+    columns:
+      - name: lane_id
+        tests: [unique, not_null]
+      - name: origin_dc
+        tests: [not_null]
+      - name: origin_tz_name
+        tests: [not_null]
+      - name: dest_tz_name
+        tests: [not_null]
+
+  # ------------------------------------------------------------ marketing (S7)
+
+  - name: stg_marketing__ads_spend_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [report_date, platform, campaign_id, market_code, channel]
+    columns:
+      - name: ad_spend_key
+        tests: [unique, not_null]
+      - name: report_date
+        tests: [not_null]
+      - name: platform
+        tests: [not_null]
+      - name: spend_cents
+        tests: [not_null]
+      - name: currency_code
+        tests: [not_null]
+
+  - name: stg_marketing__email_events
+    columns:
+      - name: email_event_key
+        tests: [unique, not_null]
+      - name: send_id
+        tests: [not_null]
+      - name: campaign_id
+        tests: [not_null]
+      - name: event_type
+        tests: [not_null]
+      - name: email_hash
+        tests: [not_null]
+
+  # ------------------------------------------------------------- customer (S8)
+
+  - name: stg_customer__customers
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: account_name
+        tests: [not_null]
+      - name: market_code
+        tests: [not_null]
+      - name: created_on
+        tests: [not_null]
+
+  - name: stg_customer__id_map
+    columns:
+      - name: legacy_id
+        tests: [unique, not_null]
+      - name: migrated_at
+        tests: [not_null]
+
+  - name: stg_customer__nwv_accounts
+    columns:
+      - name: nwv_account_id
+        tests: [unique, not_null]
+      - name: account_name
+        tests: [not_null]
+      - name: opened_on
+        tests: [not_null]
+
+  - name: stg_support__tickets
+    columns:
+      - name: ticket_id
+        tests: [unique, not_null]
+      - name: party_ref
+        tests: [not_null]
+      - name: party_source
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['oms', 'nwv']
+      - name: opened_at
+        tests: [not_null]
+
+  # -------------------------------------------------------------- product (S9)
+
+  - name: stg_product__pim_versions
+    description: One row per SKU per day, after the source tie-break.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [sku, updated_date]
+    columns:
+      - name: change_id
+        tests: [unique, not_null]
+      - name: sku
+        tests: [not_null]
+      - name: category_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_product__categories')
+              field: category_id
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['pim_ui', 'supplier_feed', 'bulk_load']
+      - name: list_price_cents
+        tests: [not_null]
+
+  - name: stg_product__categories
+    columns:
+      - name: category_id
+        tests: [unique, not_null]
+      - name: category_name
+        tests: [not_null]
+      - name: dept_code
+        tests: [not_null]
+
+  # ------------------------------------------------------------ reference (S10)
+
+  - name: stg_reference__fiscal_calendar
+    columns:
+      - name: cal_date
+        tests: [unique, not_null]
+      - name: fiscal_year
+        tests: [not_null]
+      - name: fiscal_month
+        tests: [not_null]
+      - name: comp_date_ly
+        description: >
+          The comparable day a year back. Empty for the first fiscal year in the
+          calendar, which has no year before it.
+
+  - name: stg_reference__market_calendar
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [market_code, calendar_date]
+    columns:
+      - name: market_code
+        tests: [not_null]
+      - name: calendar_date
+        tests: [not_null]
+
+  - name: stg_reference__fx_rates
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [rate_date, currency_code]
+    columns:
+      - name: rate_date
+        tests: [not_null]
+      - name: currency_code
+        tests: [not_null]
+      - name: fx_rate_ppm
+        description: Parts per million against USD. Integer, never a float.
+        tests: [not_null]
+
+  - name: stg_reference__payment_terms
+    columns:
+      - name: payment_terms_code
+        tests: [unique, not_null]
+      - name: net_days
+        tests: [not_null]
+
+  - name: stg_reference__dept_cost_complement
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [dept_code, fiscal_month]
+    columns:
+      - name: dept_code
+        tests: [not_null]
+      - name: cost_complement_bps
+        tests: [not_null]
+
+  # ------------------------------------------------------------- finance (S13)
+
+  - name: stg_finance__invoices
+    columns:
+      - name: invoice_id
+        tests: [unique, not_null]
+      - name: invoice_number
+        tests: [not_null]
+      - name: entity_code
+        tests: [not_null]
+      - name: invoice_date
+        tests: [not_null]
+      - name: total_cents
+        tests: [not_null]
+      - name: fx_rate_ppm
+        description: >
+          The rate the ERP posted at. Absent on invoices the ERP raised in the
+          entity's own currency.
+
+  - name: stg_finance__invoice_lines
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [invoice_id, line_no]
+    columns:
+      - name: invoice_line_key
+        tests: [unique, not_null]
+      - name: invoice_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_finance__invoices')
+              field: invoice_id
+      - name: line_total_cents
+        tests: [not_null]
+      - name: revenue_account_code
+        tests: [not_null]
+
+  - name: stg_finance__plan_lines
+    columns:
+      - name: plan_line_id
+        tests: [unique, not_null]
+      - name: plan_id
+        tests: [not_null]
+      - name: term_start
+        tests: [not_null]
+      - name: amount_cents
+        tests: [not_null]
+
+  - name: stg_finance__credit_memos
+    columns:
+      - name: credit_memo_id
+        tests: [unique, not_null]
+      - name: invoice_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_finance__invoices')
+              field: invoice_id
+      - name: amount_cents
+        tests: [not_null]
+
+  - name: stg_finance__disputes
+    columns:
+      - name: dispute_id
+        tests: [unique, not_null]
+      - name: invoice_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_finance__invoices')
+              field: invoice_id
+      - name: raised_date
+        tests: [not_null]
+
+  # ----------------------------------------------------------------------- ops
+
+  - name: stg_ops__load_control
+    columns:
+      - name: load_id
+        tests: [unique, not_null]
+      - name: job_name
+        tests: [not_null]
+      - name: business_date
+        tests: [not_null]
+
+  - name: stg_ops__merge_candidates
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [customer_id, nwv_account_id]
+    columns:
+      - name: customer_id
+        tests: [not_null]
+      - name: nwv_account_id
+        tests: [not_null]
+      - name: confidence
+        tests: [not_null]

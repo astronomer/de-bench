@@ -1,0 +1,202 @@
+version: 2
+
+models:
+
+  - name: inventory_position
+    description: contracts/inventory_position.yml, consumer C-7.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku, location_id]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: sku
+        tests: [not_null]
+      - name: location_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_warehouse')
+              field: location_id
+      - name: on_hand_units
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+      - name: demand_units
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+
+  - name: snap_inventory_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku, location_id]
+    columns:
+      - name: warehouse_key
+        tests:
+          - relationships:
+              to: ref('dim_warehouse')
+              field: warehouse_key
+      - name: variance_units
+        tests: [not_null]
+
+  - name: fct_inventory_movements
+    columns:
+      - name: movement_key
+        tests: [unique, not_null]
+      - name: date_key
+        tests: [not_null]
+      - name: qty
+        tests: [not_null]
+
+  - name: fct_inventory_valuation
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku, warehouse_key]
+    columns:
+      - name: valuation_method
+        tests:
+          - accepted_values:
+              values: ['unit_cost', 'cost_complement', 'not_valued']
+
+  - name: fct_stock_count_variance
+    columns:
+      - name: count_key
+        tests: [unique, not_null]
+      - name: count_adjustment_units
+        tests: [not_null]
+
+  - name: sell_through_daily
+    description: contracts/sell_through_daily.yml, consumer C-11.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku, store_id]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: sku
+        tests: [not_null]
+      - name: store_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_store')
+              field: store_key
+      - name: store_region
+        tests: [not_null]
+      - name: demand_units
+        tests: [not_null]
+      - name: net_sales_cents
+        tests: [not_null]
+
+  - name: agg_replenishment_gaps
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku, location_id]
+    columns:
+      - name: on_hand_units
+        tests: [not_null]
+
+  - name: backorder_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, sku]
+    columns:
+      - name: ds
+        tests: [not_null]
+      - name: ordered_units
+        tests: [not_null]
+
+  - name: dc_capacity_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, location_id]
+    columns:
+      - name: warehouse_key
+        tests:
+          - relationships:
+              to: ref('dim_warehouse')
+              field: warehouse_key
+      - name: units_held
+        tests: [not_null]
+
+  - name: fct_shipments
+    columns:
+      - name: shipment_key
+        tests: [unique, not_null]
+      - name: carrier_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_carrier')
+              field: carrier_key
+      - name: warehouse_key
+        tests:
+          - relationships:
+              to: ref('dim_warehouse')
+              field: warehouse_key
+      - name: total_freight_cents
+        tests: [not_null]
+
+  - name: fct_shipping_costs
+    columns:
+      - name: package_key
+        tests: [unique, not_null]
+      - name: carrier_key
+        tests:
+          - relationships:
+              to: ref('dim_carrier')
+              field: carrier_key
+      - name: total_freight_cents
+        tests: [not_null]
+
+  - name: lane_performance_daily
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [ds, lane_id, carrier_code, service_family]
+    columns:
+      - name: shipment_count
+        tests: [not_null]
+      - name: freight_cents
+        tests: [not_null]
+
+  - name: freight_accrual_monthly
+    description: Finance reads this table. docs/lineage.md carries the row.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [period_start, carrier_code]
+    columns:
+      - name: period_start
+        tests: [not_null]
+      - name: accrual_cents
+        tests: [not_null]
+      - name: shipped_total_cents
+        tests: [not_null]
+
+  # ---------------------------------------------------------------- int layer
+  #
+  # The SKU relationship, re-placed here from the two inventory staging models
+  # under QC-2 row 4. Staging carries the merchandising code and `dim_product`
+  # carries the catalog key, so the relationship holds only where this model has
+  # matched the two, and `catalog_sku` is that column. The unmatched rows are
+  # NULL and a relationships test passes over them, which is the honest reading:
+  # what an unmatched row means is what `match_method` says, not a broken key.
+
+  - name: int_sku_crosswalk
+    description: >
+      One row per merchandising code, with the catalog key where the ordinal
+      matched. DQ-77 re-placed the staging relationships tests here.
+    columns:
+      - name: merch_sku
+        tests: [unique, not_null]
+      - name: catalog_sku
+        tests:
+          - relationships:
+              to: ref('dim_product')
+              field: sku
+      - name: match_method
+        tests: [not_null]

@@ -1,0 +1,39 @@
+# The warehouse is one DuckDB file and DuckDB takes one writer, so this profile
+# runs single-threaded on purpose. Raising threads does not make a run faster
+# here; it makes it fail with a lock error partway through.
+#
+# The path is assembled from two environment variables and holds no absolute
+# path of its own:
+#
+#   COPPERLINE_HOME  the checkout root. Defaults to ../.. , which is what you
+#                    get when you run dbt from this directory.
+#   DUCKDB_PATH      the warehouse, relative to COPPERLINE_HOME. The deployment
+#                    sets it; the default matches the committed layout.
+#
+# Read-only work goes against the snapshot copy. Set both variables and point
+# DUCKDB_PATH at warehouse/snapshot.duckdb — see dbt/README.md, "Two files".
+
+copperline_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('COPPERLINE_HOME', '../..') }}/{{ env_var('DUCKDB_PATH', 'include/data/copperline.duckdb') }}"
+      threads: 1
+      extensions:
+        - httpfs
+        - parquet
+      settings:
+        memory_limit: "2GB"
+
+    # The nightly deployment. Same file, same one writer, and a longer
+    # statement timeout because fct_order_line rebuilds in this target.
+    prod:
+      type: duckdb
+      path: "{{ env_var('COPPERLINE_HOME', '../..') }}/{{ env_var('DUCKDB_PATH', 'include/data/copperline.duckdb') }}"
+      threads: 1
+      extensions:
+        - httpfs
+        - parquet
+      settings:
+        memory_limit: "6GB"

@@ -1,0 +1,9 @@
+checks:
+- kind: scoring_primitive
+  name: timetable_uses_type_annotation
+- kind: scoring_primitive
+  name: loader_uses_load_yaml_dags
+- kind: scoring_primitive
+  name: sla_miss_callback_handled
+- kind: scoring_primitive
+  name: dag_factory_pin_uplifted

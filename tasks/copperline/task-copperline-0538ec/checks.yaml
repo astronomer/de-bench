@@ -1,0 +1,239 @@
+# Twelve tests fail on this tree. Nine are stale against the April 2026
+# quality-contract revision and three are real. The ticket asks for the split,
+# so the checks grade the split: what the nine leave behind, what the three keep,
+# and what the write-up says about each side.
+#
+# Nothing here runs dbt, and nothing needs to: the split is legible from the
+# files. A stale test is one that is no longer where it was; a real one is one
+# that is still asserting what it asserted. Every graded fact below names the
+# file it comes from.
+#
+# The wrong answers this battery is built to convict:
+#
+#   delete all twelve                the three file_contains checks on the real
+#                                    ties fail — the files are gone
+#   change nothing                   the staging file_lacks fails; so does every
+#                                    RESPONSE check
+#   mute the run                     `exclude` on a step fails the DAG-yaml
+#                                    file_lacks; dropping a team fails
+#                                    dag_structure; flipping the project to
+#                                    warnings fails the dbt_project.yml check
+#   widen until green                the tolerance patterns on the two ties pin
+#                                    the 100-cent allowance the contracts set
+#   retire the wrong nine            calling either real settlement tie stale
+#                                    means deleting or rewriting it, which the
+#                                    file_contains checks catch; calling the two
+#                                    un-contracted mart ties real leaves them in
+#                                    place, which the mart-tie file_lacks catches
+#   right split, no reading          the RESPONSE checks want the two processor
+#                                    names, the settlement line types, the fourth
+#                                    channel, line-level promotions and the model
+#                                    the SKU relationship moves onto — none of
+#                                    which is in the ticket
+replay: []
+
+checks:
+
+# The nightly still runs, and still runs six team selections. Taking a team out
+# of the graph is the cheapest way to make the run green and it is the move the
+# ticket forbids in as many words.
+- kind: dag_parses
+  dag_id: plat_dbt_test_nightly
+- kind: dag_structure
+  dag_id: plat_dbt_test_nightly
+  task_ids:
+  - test_shared
+  - test_finance
+  - test_commerce
+  - test_supply
+  - test_growth
+  - test_customer
+  operators:
+    test_shared: BashOperator
+    test_commerce: BashOperator
+
+# `include/lib/blueprint/kinds/dbt_select.py` takes an `exclude` key and turns it
+# into `dbt test --exclude`, which is muting with a smaller blast radius. Comments
+# are stripped before this reads, so a note saying the exclusion was considered
+# and dropped is safe.
+- kind: file_lacks
+  path: projects/platform/dags/dbt_test_nightly.dag.yaml
+  patterns:
+  - 'exclude'
+
+# The suite-wide severity. `dbt/copperline_analytics/dbt_project.yml` ships
+# `+severity: error` under `tests:`, and one word there turns all 625 tests into
+# warnings. The file_contains pins the shipped setting; the file_lacks catches the
+# same move made per-test, in a singular test's own config block. Only the
+# warning value and the two thresholds are named, so a test that says
+# `severity='error'` out loud is not convicted for being explicit.
+- kind: file_contains
+  path: dbt/copperline_analytics/dbt_project.yml
+  matches:
+  - '\+severity:\s*error'
+- kind: file_lacks
+  path: dbt/copperline_analytics/tests/commerce/*.sql
+  patterns:
+  - "severity\\s*[=:]\\s*['\"]?warn"
+  - 'warn_if'
+  - 'error_if'
+
+# The seven stale staging tests, which QC-2 retires by shape. Each pattern is
+# scoped to the block it grades — the tempered repeat stops at the next `- name:`
+# key — so a not_null somewhere else in this 400-line file cannot stand in for
+# the one being graded. The two relationships tests share one pattern because
+# the file names `dim_product` exactly twice and both names are those tests.
+#
+#   dim_product              QC-2 row 4: staging-to-dimension relationships move to int_
+#   unit_cost_cents          QC-2 row 8, which names the column
+#   from_location            QC-2 row 1: not_null on a column the source omits
+#   gift_cards accepted      QC-2 row 2: a new source status is not a defect
+#   ledger accepted          QC-2 row 2, the same shape from the other side
+#   ledger order_id          QC-2 row 1
+#
+# Retiring a test and re-placing it both satisfy these patterns. What is graded
+# is that the assertion has left the staging layer, not where it went. The
+# graded words are held to YAML test syntax (`tests: [not_null]` or a
+# `- not_null` list item), not vocabulary: two trials retired every test
+# correctly and were convicted for a `description:` that says, in prose, what
+# was retired and why — which is exactly the note a careful reader leaves.
+- kind: file_lacks
+  path: dbt/copperline_analytics/models/shared/staging/_stg_models.yml
+  patterns:
+  - "ref\\(\\s*['\"]dim_product['\"]\\s*\\)"
+  - "- name: unit_cost_cents(?:(?!\\n  - name:)(?!\\n      - name:)[\\s\\S])*?(tests:[^\\n]*\\bnot_null\\b|-\\s*not_null\\b)"
+  - "- name: from_location(?:(?!\\n  - name:)(?!\\n      - name:)[\\s\\S])*?(tests:[^\\n]*\\bnot_null\\b|-\\s*not_null\\b)"
+  - "\\n  - name: stg_sales__gift_cards\\b(?:(?!\\n  - name:)[\\s\\S])*?(-\\s*accepted_values\\b|accepted_values\\s*:)"
+  - "\\n  - name: stg_sales__gift_card_ledger\\b(?:(?!\\n  - name:)[\\s\\S])*?(-\\s*accepted_values\\b|accepted_values\\s*:)"
+  - "\\n  - name: stg_sales__gift_card_ledger\\b(?:(?!\\n  - name:)[\\s\\S])*?- name: order_id(?:(?!\\n      - name:)(?!\\n  - name:)[\\s\\S])*?(tests:[^\\n]*\\bnot_null\\b|-\\s*not_null\\b)"
+
+# The two stale mart ties. Both assert a rule no contract states, which is what
+# QC-1 calls a test of somebody's assumption.
+#
+# The glob is the directory, not the two files, so deleting either one passes:
+# the other seven ties keep the glob non-empty and a deleted file cannot match.
+#
+#   the three-channel list   tie_channel_mix_daily_channel_coverage sums store,
+#                            web and marketplace against the day's booked total.
+#                            `trade` is the fourth channel. The pattern closes on
+#                            the bracket, so adding trade to the list passes and
+#                            leaving the three alone does not.
+#   the unscoped promo sum   tie_order_economics_promo_allocation compares the
+#                            header discount against every promotion applied.
+#                            `stg_sales__promo_applications.is_header_discount`
+#                            is the scope it lacks; the pattern trips only when
+#                            the sum reaches `group by` with neither that column
+#                            nor `order_line_id` between.
+- kind: file_lacks
+  path: dbt/copperline_analytics/tests/commerce/*.sql
+  patterns:
+  - "in\\s*\\(\\s*'store',\\s*'web',\\s*'marketplace'\\s*\\)"
+  - "ref\\(\\s*'stg_sales__promo_applications'\\s*\\)(?:(?!is_header_discount)(?!order_line_id)[\\s\\S])*?group by"
+
+# The three real ties, still asserting what they asserted. Each check names the
+# model the test reads and the quantity it compares, so a test emptied out to a
+# `select ... where false` fails as surely as a deleted one.
+#
+# The 100-cent allowances are pinned. Both come from a consumer contract —
+# contracts/daily-flash.md commits the flash to one store sales number and
+# contracts/settlement-summary.md commits C-3 to one GMV per seller per week —
+# and the ticket says a tolerance does not move. `\b` after the 100 is what stops
+# 10000 from passing as 100.
+- kind: file_contains
+  path: dbt/copperline_analytics/tests/commerce/tie_channel_daily_store_pos.sql
+  matches:
+  - "ref\\(\\s*['\"]agg_daily_store_sales['\"]\\s*\\)"
+  - 'abs\([^)]*variance_cents[^)]*\)\s*>\s*100\b'
+- kind: file_contains
+  path: dbt/copperline_analytics/tests/commerce/tie_settlement_processor_overlap.sql
+  matches:
+  - "ref\\(\\s*['\"]int_payment_matched['\"]\\s*\\)"
+  - 'is_shadow_quarter'
+- kind: file_contains
+  path: dbt/copperline_analytics/tests/commerce/tie_gmv_settlement_reconstructs_order.sql
+  matches:
+  - "ref\\(\\s*['\"]int_settlement_matched['\"]\\s*\\)"
+  - 'commission_cents'
+  - '>\s*100\b'
+
+# The write-up. Patterns are matched case-insensitively and written loose: what
+# each pins is a number, a name or a fact, never a phrasing. A table row satisfies
+# them as readily as a sentence.
+
+# The split, as two numbers. Nine stale and three real of the ticket's twelve
+# is the answer; either number alone is available by guessing and both
+# together are not. Four also counts as the real half: a trial found
+# `tie_carrier_invoice_to_packages` red as well (draft invoices in the
+# invoiced sum — BRFR/PLPC/MWLG, FY2026-P05) and reported "9 stale, 4 real".
+# The ticket names twelve, so it could not have named the thirteenth; a reply
+# that found it has read the suite, not miscounted it, and the three named
+# ties are graded by the checks below either way.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((\bnine\b|\b9\b)[^\n]{0,60}(stale|retire|superseded|re-?deriv|re-?place|memo)|(stale|retire|superseded|re-?deriv|re-?place)[^\n]{0,60}(\bnine\b|\b9\b))'
+  # The count is bound to its noun: a 60-character window let any table row or
+  # numbered list item holding a "4" near the word "real" satisfy this — "Two
+  # are real" above "QC-2 row 4 ... no real defect" passed it.
+  - '((\bthree\b|\b3\b|\bfour\b|\b4\b)\s*(of (them|these|the (twelve|12)))?\s*(are|were|remain|is|tests?|failures?|ties?)?[^\n]{0,12}(real|genuine|defect|true disagree)|(real|genuine|defect|disagree)[^\n]{0,20}\b(three|3|four|4)\b)'
+
+# The three real ones, named. The ticket asks for all twelve by test name, so a
+# reply that reaches the right split has these three in it.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'tie_channel_daily_store_pos'
+  - 'tie_settlement_processor_overlap'
+  - 'tie_gmv_settlement_reconstructs_order'
+
+# Which two sources disagree, for each of the three. Every fact here is in the
+# tree and none of it is in the ticket: the till against the order book
+# (models/commerce/agg_daily_store_sales.sql), the two processors by name
+# (models/commerce/intermediate/int_payment_matched.sql), and the three
+# settlement line types that should add back up to the marketplace order
+# (models/commerce/intermediate/int_settlement_matched.sql). The take rate is
+# what the GMV gap costs, and the tie's own header says so.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(till|point of sale|\bpos\b)'
+  - 'halcyon'
+  - 'meridian'
+  - '(principal|commission)'
+  # The cost of the gap can be cited from the tie's header (take rate,
+  # settlement_weekly) or from the contract that states the same equation —
+  # SS-1 in contracts/settlement-summary.md, payout = gmv − commission − fees.
+  - '(take[ -]?rate|settlement_weekly|settlement-summary|payout_cents)'
+
+# The memo, cited. QC-3 is the clause that makes an old test stale and the ticket
+# says to retire against the memo, so a reply that retires nine tests without
+# naming what it retired them against has not made the argument.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(2026-04-quality-contract-revision|QC-[123])'
+
+# The two mart ties that are stale, and why — the part of the split the memo's
+# table does not hand over. Both sit at the mart layer, where QC-2's rows do not
+# reach, and both are stale under QC-1's last sentence instead: a mart test not
+# traceable to a contract clause. The fourth channel and the line-level
+# promotions are the facts that say so, and they are in the tests' own headers
+# and in contracts/order_economics.yml.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'tie_channel_mix_daily_channel_coverage'
+  - 'tie_order_economics_promo_allocation'
+  - '(trade[^\n]{0,80}channel|channel[^\n]{0,80}trade|fourth channel)'
+  - '(line[ -]?level|line promotion|line_total_cents|order_line_id)'
+
+# Where the SKU relationship goes. QC-2 row 4 re-places a staging-to-dimension
+# relationships test at int_, and the only model in the tree that crosses the two
+# SKU spellings is models/supply/intermediate/int_sku_crosswalk.sql, whose header
+# says the merchandising code and the catalog key match for about eight per cent
+# of rows. An agent that deleted the two relationships tests without ever finding
+# the crosswalk cannot say where they went.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'int_sku_crosswalk'

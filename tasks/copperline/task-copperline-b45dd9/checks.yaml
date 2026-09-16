@@ -1,0 +1,278 @@
+# The deliverable is a written answer, so every check reads RESPONSE.md. The
+# eight of them grade eight separate decisions: the cadence and the arithmetic
+# under it, the collision population in the order book, what a reference-alone
+# join does to the feed, how the feed splits under it, what it misattributes in
+# orders and in money, the shape of the per-period column and the day that
+# explains it, and whether the key both documents point at resolves. A reply
+# that lands one figure by luck passes one of the eight.
+#
+# Patterns are matched case-insensitively with re.search, so they are written
+# loose on purpose: a figure may carry a comma or not, and a label may be bold,
+# bracketed or punctuated any way the writer likes. What each pattern pins is a
+# figure or a named date, never a phrasing.
+#
+# Each figure is fenced by `(?<![0-9,])` and `(?![0-9]|[ ,][0-9])` so that it
+# cannot be satisfied by a longer number that happens to start or end with the
+# same digits. Several of these really do collide that way: 918,830 sits inside
+# no other figure here, but 200,000 sits inside 200,000-something and 50 sits
+# inside almost everything, which is why the two small ones are tied to a word.
+#
+# WHERE THE FIGURES COME FROM
+# ---------------------------
+# All of them are read straight off a full-profile world. Nothing here is
+# authored and nothing is planted: it is the shipped reference meeting the
+# shipped order book.
+#
+#   python -m gen_copperline --timeline worlds/copperline/timeline.yaml \
+#       --planted worlds/copperline/planted.yaml --db W.duckdb \
+#       --landing L --profile full
+#
+# The four populations every figure comes out of:
+#
+#   feed    = raw.pay_meridian_settlements, every row          2,058,581
+#   book    = raw.orders, every row                            3,436,578
+#   naive   = feed JOIN book USING (order_ref)                 29,968,433 rows
+#   honest  = feed JOIN raw.payment_intents USING (intent_id)
+#             JOIN book ON book.order_ref = i.order_ref
+#             AND book.local_order_date BETWEEN i.created_at::DATE - 7
+#                                           AND i.created_at::DATE + 7
+#                                                              2,058,581 rows
+#
+# and then:
+#
+#   references on the book                        570,523
+#   orders sharing a reference                    3,107,760   (90.4%)
+#   orders holding a reference of their own       328,818
+#   most orders on one reference                  18
+#   events resolving to exactly one order         227,041     (11.0%)
+#   events resolving to more than one             1,831,540
+#   events resolving to none                      0
+#   distinct orders the naive join touches        3,096,290
+#   distinct orders behind the feed, honestly     918,830
+#   money on the naive join                       1,530,264,361,359
+#   money on the feed                             105,596,982,367
+#   FY2025 P10 / P11 / P12 unambiguous events     198,260 / 27,554 / 1,227
+#   2025-11-28: orders / with a reference of
+#     their own                                   146,721 / 141,941
+#   raw.payment_intents.order_id range            8,840,127 .. 181,202,656
+#   digits of raw.orders.order_id                 1 .. 3,436,578
+#   rows the two pair up on                       0, on any cast
+#
+# The honest pairing is stable: every window from 2 days to 45 gives the
+# identical 2,058,581 rows and the identical 918,830 orders. At 49 the recycle
+# collides and the row count goes to 3,579,951. So no check here turns on the
+# window the reply picked, only on the answer it produced.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# THE CADENCE, AND THE ARITHMETIC UNDER IT. 50 days, out of 10,000,000
+# references the seven-digit format can hold against the 200,000 order keys the
+# OMS issues in a day. The ticket asks for both numbers and not only the
+# cadence, because the cadence alone can be copied out of a docstring:
+# `int_orders_enriched` and `stg_payments__payment_intents` both say "about
+# every fifty days" in their headers. The second pattern is what shows the
+# reply worked it out or measured it.
+#
+# Wrong answers this convicts:
+#   24 hours    docs/billing-integration.md §B-6, which says the reference is
+#               "recycled across retry attempts inside a 24-hour window". That
+#               recycle is real and it is a different one — it repeats a
+#               reference inside one payment, not across two orders — and it is
+#               the reading the whole ticket exists to correct.
+#   7 digits    the format's width offered as the cadence, with no volume in it.
+#
+# The second pattern takes either side of the division, and takes "10 million"
+# and "ten million" as well as the digits: which of the two numbers a reply
+# leads with is a matter of taste, and the words are not the decision.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '((?<![0-9,])50(?![0-9]|[ ,][0-9])[^0-9\n]{0,20}days?|fifty[^0-9\n]{0,20}days?)'
+  - '((?<![0-9,])(10[,\s]?000[,\s]?000|200[,\s]?000)(?![0-9]|[ ,][0-9])|(10|ten)[\s-]?million)'
+
+# THE COLLISION POPULATION IN THE ORDER BOOK. 3,107,760 of the 3,436,578 orders
+# carry a reference at least one other order also carries, spread over 570,523
+# distinct references. Both figures are required: the count of orders alone
+# does not show the reply counted references at all, and 570,523 alone does not
+# say how much of the book is exposed.
+#
+# Wrong answers this convicts:
+#   3,436,578   the whole book offered as the colliding population, which is
+#               the answer a reply gets by never subtracting the 328,818
+#               orders that do hold a reference of their own.
+#     241,705   the references that name more than one order, offered as the
+#               orders. It is a true number of a different thing and it is off
+#               by more than a factor of twelve.
+#     328,818   the complement — the orders that are safe — offered as the ones
+#               that are not.
+#
+# The most orders on one reference is 18 and the ticket asks for it, but a bare
+# "18" in a page of prose matches too much to be worth pinning, so it is not
+# graded here.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])3[,\s]?107[,\s]?760(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])570[,\s]?523(?![0-9]|[ ,][0-9])'
+
+# WHAT THE JOIN DOES TO THE FEED. 2,058,581 rows in, 29,968,433 out. The ticket
+# names the population in as many words — every row, every type, every state —
+# so the filters below are not defensible readings, they are the ticket
+# ignored.
+#
+# Wrong answers this convicts:
+#   1,018,051 in / 14,823,258 out   `event_type = 'captured'` only. The
+#             commonest instinct on this feed, and §B-1 does support dropping
+#             authorizations from a MONEY figure — but this is a count of what
+#             a join returns, and the ticket says every row.
+#   2,052,548 in / 29,881,096 out   the soft-deleted rows dropped.
+#   2,040,968 in / 29,712,502 out   the restatements dropped.
+#   1,194,355 in / 17,405,341 out   `raw.payment_intents` audited instead of
+#             the settlement feed. The attempt log is the right table for the
+#             honest pairing and the wrong one for this question: audit asked
+#             about the events the recovery list is built from.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])2[,\s]?058[,\s]?581(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])29[,\s]?968[,\s]?433(?![0-9]|[ ,][0-9])'
+
+# HOW THE FEED SPLITS. 227,041 events reach exactly one order on the reference
+# alone and 1,831,540 reach more than one. This is the pair that settles §B-6:
+# 11.0% of the feed resolves, not 96%, and read the other way round — events
+# that match anything at all — it is 100%, because no event reaches none. There
+# is no reading of this data that produces 96, and a reply that lands these two
+# figures has shown that whether or not it says so in words. The verdict is not
+# graded separately for that reason.
+#
+# Wrong answers this convicts:
+#   130,839 / 1,063,516   the same split taken at attempt grain over
+#                         `raw.payment_intents`. Same story, wrong population.
+#   112,089 / 905,962     captures only.
+#   about 4% / 96%        §B-6 restated instead of measured.
+#
+# A reply that reports the third figure as 0 and stops there has answered a
+# question nobody asked; the zero is worth stating and is not the decision.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])227[,\s]?041(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])1[,\s]?831[,\s]?540(?![0-9]|[ ,][0-9])'
+
+# WHAT IT MISATTRIBUTES, IN ORDERS. A reference-alone join hangs a Meridian
+# event on 3,096,290 distinct orders — 90.1% of the whole book — and 918,830
+# orders actually took one. The gap, 2,177,460 orders, is the size of the risk
+# in the only unit audit will care about. Both sides are required: the damage
+# figure means nothing without the honest figure beside it.
+#
+# The honest figure is over-determined, which is what makes it fair to grade.
+# The reference-and-date pairing gives 918,830 at any window from 2 days to 45,
+# and `raw.payment_intents.order_id` — which cannot be joined to anything —
+# carries exactly 918,830 distinct values behind the same events. A reply that
+# reached it either way lands the same number.
+#
+# Wrong answers this convicts:
+#   920,929     distinct `raw.payment_intents.order_id` over the WHOLE attempt
+#               log rather than over the attempts the feed names. A near miss
+#               by 2,099, and the reason the ticket scopes the honest side to
+#               the feed.
+#   1,130,242   the reference-and-date pairing at a 49-day window, where the
+#               recycle reaches the neighbouring order.
+#   3,096,290   offered on its own, with no honest count to hold it against —
+#               a number with no risk in it.
+#   1,000,895 / 1,194,355   attempts counted as orders.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])3[,\s]?096[,\s]?290(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])918[,\s]?830(?![0-9]|[ ,][0-9])'
+
+# WHAT IT MISATTRIBUTES, IN MONEY. 1,530,264,361,359 cents on the join against
+# the 105,596,982,367 the feed carries — 14.49 times over. The ticket defines
+# money for this page in one sentence: `amount_cents` added as it stands, signs
+# and all, over the rows under discussion. It says so precisely because the
+# honest reading of this feed for a REVENUE figure is a different one, and this
+# page is not a revenue figure.
+#
+# Wrong answers this convicts:
+#   787,065,598,192 / 54,326,273,383   captures only, which is the right rule
+#                   for the close and the wrong one for this page.
+#   1,525,736,540,536 / 105,284,723,767   deleted rows dropped, against §R-6.
+#   1,516,794,239,483 / 104,665,038,070   restatements dropped.
+#
+# A reply that also prices the two sides in dollars, or that quotes the 14.49
+# multiple, still matches — the cents are what is pinned.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])1[,\s]?530[,\s]?264[,\s]?361[,\s]?359(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])105[,\s]?596[,\s]?982[,\s]?367(?![0-9]|[ ,][0-9])'
+
+# THE PERIOD COLUMN, AND THE DAY UNDER IT. Every unambiguous event in the feed
+# falls in three consecutive periods — FY2025 P10 (198,260), P11 (27,554) and
+# P12 (1,227) — and every other period holds none at all. The reason is one
+# trading day, 2025-11-28: the OMS uses a few thousand of its 200,000 daily
+# keys on an ordinary day, so every reference it issues is issued again 50 days
+# later, but on that day it placed 146,721 orders and ran past the offsets any
+# other day in the book has ever reached. 141,941 of that day's orders carry a
+# reference no other order carries, and the settlements on them are the whole
+# of the 227,041.
+#
+# The two period figures and the date are graded. P12's 1,227 is not: it is the
+# tail of the same population and pinning it grades persistence rather than a
+# decision.
+#
+# Wrong answers this convicts:
+#   2024-11-29   the previous year's equivalent day. It is the second largest
+#                in the book (134,646 orders, 129,471 of them unique) and it
+#                sits before the Meridian feed opens, so it explains none of
+#                the table. A reply naming both days passes; a reply naming
+#                only this one has not read the column it was asked about.
+#   a period the reply picks because it is the largest   FY2025 P10 is also the
+#                busiest period in the feed, at 345,273 events, so a reply can
+#                land on it for the wrong reason — which is why the date is
+#                required beside the two counts.
+#   "the peak season"   the shape blamed on November trading in general. It is
+#                one day: the day either side of it resolves nothing.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])198[,\s]?260(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])27[,\s]?554(?![0-9]|[ ,][0-9])'
+  - '2025-11-28'
+
+# THE KEY THE DOCUMENTS SEND US TO. `raw.payment_intents.order_id` runs
+# 8,840,127 to 181,202,656 and the digits of `raw.orders.order_id` run 1 to
+# 3,436,578. The ranges do not touch, so nothing pairs up on any cast: the
+# prefix strip is zero rows, the pad into `ORD-########` is zero rows, and
+# `order_id <= 3436578` is zero rows. §B-6 calls it the durable key and
+# `stg_payments__payment_intents` casts it into a column called
+# `processor_order_key`, and it is the processor's own counter.
+#
+# This is the find. Both documents send a reader here, and the reader who
+# follows them writes a join that returns nothing and has no reason to suspect
+# the column rather than their own SQL.
+#
+# The third pattern wants the reply to say the pairing is empty rather than
+# merely awkward. A reply that says the column "is not reliable" or "should be
+# used with care" has not measured it.
+#
+# Wrong answers this convicts:
+#   "use payment_intents.order_id"   the documents believed. It is the
+#               recommendation §B-6 makes and the one that cannot be carried
+#               out.
+#   a non-zero pair count            arrived at by joining `intent_id` (which
+#               does work) and reporting that as the order key working.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(?<![0-9,])8[,\s]?840[,\s]?127(?![0-9]|[ ,][0-9])'
+  - '(?<![0-9,])181[,\s]?202[,\s]?656(?![0-9]|[ ,][0-9])'
+  # The zero has to count rows, or the claim has to be about disjoint values:
+  # the prompt's own sentence "the pairing gives one order per event and
+  # leaves none" satisfied the bare "pair ... none" arm, so a reply could
+  # echo the ticket and pass.
+  - '(\b(zero|nothing|none|not one|no)\b[^\n]{0,40}\b(rows?|records?)\b[^\n]{0,40}\b(pair|match|join|resolv)|\b(pair|match|join|resolv)[a-z]*\b[^\n]{0,40}((zero|no|0)\s?(rows?|records?|matches?)|nothing|empty)|order_id[^\n]{0,80}(shares? no|no shared|disjoint|never overlap)|shares? no values)'

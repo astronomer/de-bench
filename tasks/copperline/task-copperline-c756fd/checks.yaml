@@ -1,0 +1,225 @@
+# `nightly_close` has never run against this warehouse and five separate things
+# stop it, in the order the graph meets them. The ticket names the four areas
+# they sit in and none of the fixes: every one of them is loud the moment the
+# step is run, so hiding them would buy tedium rather than difficulty. The work
+# is getting all five right at once, and two of them need a ruling the tree does
+# not settle on its own.
+#
+#   1. `close_price_book` reads `marts.dim_product`. That relation is dbt's and
+#      is not in the shipped warehouse; `valid_from` and `valid_to` are on no
+#      version of it; and the version dbt does build keeps one row per SKU at
+#      today's price, so it could not price an old night if it were there. The
+#      statement also binds two placeholders and `build_step` passes one, so the
+#      step dies on the parameter count before it dies on the relation.
+#   2. `close_apply_list_price` prices every row of `raw.orders`, staff
+#      transactions included, while `enrich_base` two steps earlier drops them.
+#      That is the population disagreement the revenue tie then trips over.
+#   3. `close_pricing_tie` holds a tax-exclusive, pre-header-discount line total
+#      against `subtotal - order_discount + tax`. It counts 3,230,670 of
+#      3,436,578 orders as breaks and could never come out at nought. It is
+#      wired to `build_step`, which returns the count without raising, so
+#      nothing has ever stopped on it.
+#   4. `close_economics_grain` and `close_revenue_tie` both read
+#      `marts.order_economics`, which `publish_economics` does not write until
+#      after them. On a date never closed before the grain check grades nothing
+#      and the tie raises on the whole day. The tie also holds booked against
+#      `grand_total_cents`, which carries the tax, the shipping and the
+#      order-level discount, and counts a different set of orders on each side.
+#   5. `close_publish_economics` is a bare INSERT, so a second pass at a date
+#      puts the day in twice and the order grain the merch dashboards reconcile
+#      on is gone.
+#
+# All five are the shipped world's, listed in `worlds/copperline/PLANTED.md`
+# ("The nightly close cannot run", and "Every commerce publish appends"). Nothing
+# is planted here and there is no overlay.
+#
+# COMPOSING WITH CLS-207 (`task-copperline-0ee9f9`). The two tasks grade the same
+# pipeline and each has to give the same verdict whether or not the other has
+# landed. CLS-207 owns `close_line_economics`, `close_apply_promotions` and
+# `returns_orphan_check`, and its checks pin that `booked_cents` does not move.
+# So this task grades `booked_cents`, the order population, the grain, the price
+# book and the partition write, and never `net_sales_cents` or
+# `merch_margin_cents`. Measured, not argued: with both solutions applied,
+# CLS-207's verifier is 10 passed and this one is 16 passed; with this solution
+# alone, CLS-207's verifier fails on its own three statements and on nothing
+# else. Its three files are in `do_not_modify` here as well.
+#
+# NOTHING HERE IS AN AUTHORED FIGURE. The verifier reads `raw.orders`,
+# `raw.order_lines` and `raw.pim_product_versions` in the same session that runs
+# the steps, so a tree edit cannot move the answer. Its first three tests grade
+# the world rather than the answer: if the order book ever stops agreeing with
+# its own lines, or a graded day loses its staff transactions or its
+# soft-deleted orders, the rulings the ticket states grade nothing and those
+# fail first.
+#
+# WHY NO DAG RUN. `nightly_close` opens with four file sensors and the landing
+# tree carries the last few weeks only, so `airflow dags test` on an ordinary
+# trading day never reaches the pricing half whatever the agent does. The
+# verifier imports the patched module and calls each step's own callable with
+# that step's own `op_kwargs`, in the order it reads off the patched graph. The
+# ticket tells the agent the same thing and says to drive it by hand.
+#
+# What each wrong answer does:
+#
+#   the loud one fixed and the rest left
+#       every test that reads the fixture errors. The fixture drives the whole
+#       pricing half, so the first step that still raises stops it, and the
+#       error names the step. That is what the untouched tree does: it dies in
+#       `load_price_book` on the parameter count, and 6 guards pass while 10
+#       tests error.
+#
+#   the tie's other side opened up to staff transactions instead of the
+#   pricing step being closed to them
+#       fails the published-day test on both days. The tie ties either way --
+#       that is the point of stating the ruling in the ticket -- but the mart
+#       then carries orders that are not revenue. The ticket says a staff
+#       transaction is not revenue and points at `enrich_base`, which already
+#       drops them. Measured: 2 failed, 14 passed.
+#
+#   soft-deleted orders dropped, following the shared spine
+#       fails the published-day test on both days. `stg_sales__orders` drops
+#       them and `enrich_base` keeps them, and the tree does not settle it, so
+#       the ticket does: `docs/reconciliation-policy.md` R-6, in as many words,
+#       naming the disagreement. Without that sentence this would be a coin
+#       flip and could not be graded. Measured: 2 failed, 14 passed.
+#
+#   the price book built from the price the SKU is on today
+#       fails the price-book test on both days. Every price the book carries
+#       has to be one the feed had stamped for that SKU by the close date, and
+#       on this data no SKU's current price satisfies that for either graded
+#       day. Measured: 2 failed, 14 passed.
+#
+#   the price book's tie-break taken from `stg_product__pim_versions` rather
+#   than from the price snapshot
+#       PASSES, and should. The two spellings differ (one dedupes per SKU per
+#       day on the source rank first, the other ranks the whole SKU on the
+#       stamp first) and on this feed they give the same book for both graded
+#       days. The check asks only that a price be one the feed stamped by the
+#       date, so neither reading is convicted.
+#
+#   the price book's columns renamed
+#       fails the price-book test, which reads `sku` and `list_price_cents` off
+#       it. The ticket names both columns for that reason: they are the contract
+#       with the statement below, which reads `p.list_price_cents`.
+#
+#   the pricing tie gutted to reach nought -- `where false`, `select 0`
+#       fails the pricing-tie test. It is put in front of a clean day and then
+#       in front of the same day with one line moved by a cent, and it has to
+#       tell them apart.
+#
+#   the revenue tie or the grain check deleted, emptied or made constant
+#       fails the stop-the-close test. Both are put in front of a day broken on
+#       purpose -- one order in twice, then one order missing -- and the break
+#       is made in the build AND in the mart, so a check reading either one has
+#       to see it.
+#
+#   the publish left as a bare INSERT
+#       fails the rerun test, the grain test and the published-day test.
+#       Measured: 4 failed, 12 passed.
+#
+#   a publish that clears the whole table rather than the date
+#       fails the second-date test: `FIRST` is closed, then `SECOND`, and
+#       `FIRST` has to still be there and still be right.
+#
+#   the publish moved above the two checks, leaving them on the mart
+#       PASSES, and should. It is a defensible reading -- the checks then grade
+#       the mart, which is what their names say -- even though it publishes a
+#       break before checking for one. The verifier takes the step order off
+#       the patched graph rather than from a list, so a repair that rewires is
+#       run in the order it wired. Measured: 16 passed.
+#
+#   only the revenue tie repointed at the build, the grain check left on the
+#   mart
+#       PASSES. The grain check reading the mart is weak rather than wrong: on
+#       a first pass it grades nothing, but the grain is graded directly here
+#       and the ticket's ruling is about the tie, not about it. Measured: 16
+#       passed.
+#
+#   `close_line_economics`, `close_apply_promotions` or `returns_orphan_check`
+#   repaired here
+#       fails `do_not_modify`. They are CLS-207's and the ticket says so.
+#
+#   the shared models or the contracts edited to agree with a guess
+#       fails `do_not_modify`. `int_orders_enriched` names the column
+#       `booked_cents` comes off and `stg_sales__orders` spells the population
+#       rule the close does not follow; both are the record the answer is read
+#       from.
+#
+#   another commerce DAG broken on the way past
+#       fails `dag_parses`, which asserts the whole DagBag has no import error.
+#
+# Cost: no DAG replays. The verifier drives the pricing half over three days --
+# one date twice and a second date once -- and then puts the two checks in front
+# of a broken day. About fifteen seconds of statements; the rest is
+# `warehouse.connect(read_only=True)`, which copies the 2.7 GB warehouse each
+# time a write has happened since the last read. Five copies, hence the timeout.
+replay: []
+
+checks:
+
+# The tree still imports and the close is still there.
+- kind: dag_parses
+  dag_id: nightly_close
+
+# The close kept its shape. `allow_extra` because the house style is a check
+# step per concern and a fix may reasonably add one; the operators map pins the
+# ten steps this task drives as PythonOperators, since the verifier reaches them
+# through `python_callable`. This is the guard against getting a green run by
+# deleting the tie.
+- kind: dag_structure
+  dag_id: nightly_close
+  allow_extra: true
+  task_ids:
+  - wait_store_files
+  - load_store_orders
+  - check_store_counts
+  - wait_web_files
+  - load_web_orders
+  - check_web_counts
+  - wait_marketplace_files
+  - load_marketplace_orders
+  - check_marketplace_counts
+  - wait_trade_files
+  - load_trade_orders
+  - check_trade_counts
+  - build_enrich_base
+  - join_customer
+  - join_product
+  - join_channel
+  - join_tender
+  - publish_enriched
+  - load_price_book
+  - apply_list_price
+  - apply_promotions
+  - apply_gift_cards
+  - check_pricing_ties
+  - build_line_economics
+  - build_order_economics
+  - check_economics_grain
+  - tie_to_orders
+  - publish_economics
+  - export_gl_extract
+  - export_merch_pack
+  - export_store_pack
+  - record_close_log
+  - check_close_complete
+  - notify_close_done
+  operators:
+    load_price_book: PythonOperator
+    apply_list_price: PythonOperator
+    apply_promotions: PythonOperator
+    apply_gift_cards: PythonOperator
+    check_pricing_ties: PythonOperator
+    build_line_economics: PythonOperator
+    build_order_economics: PythonOperator
+    check_economics_grain: PythonOperator
+    tie_to_orders: PythonOperator
+    publish_economics: PythonOperator
+
+# The substance. See verifier/test_outputs.py: three guards on the world, the
+# published day over two order days, the grain, a date closed twice, a second
+# date beside it, the price book, and the three checks put in front of a day
+# broken on purpose.
+- kind: pytest_verifier
+  file: test_outputs.py
+  timeout: 1500

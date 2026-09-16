@@ -1,0 +1,212 @@
+# The deliverable is a written answer, so every check reads RESPONSE.md. The
+# eight of them grade eight separate decisions: the exposure, the split it came
+# out of, the two dormancy tiers, the balance still to come, the filing dates,
+# the jurisdiction carrying the most, what the OMS status column is worth, and
+# which column of the jurisdiction table the money actually hangs on. Getting
+# the headline right and stopping passes one of the eight.
+#
+# Patterns are matched case-insensitively with re.search, so they are written
+# loose on purpose: a figure may carry a comma or not, and a label may be bold,
+# bracketed or punctuated any way the writer likes. What each pattern pins is a
+# figure or a named column, never a phrasing.
+#
+# WHERE THE FIGURES COME FROM
+# ---------------------------
+# All of them are read off the shipped world, at the profile the image bakes:
+#
+#   cd tools && PYTHONPATH=. python -m gen_copperline \
+#       --timeline ../worlds/copperline/timeline.yaml \
+#       --planted ../worlds/copperline/planted.yaml \
+#       --db W.duckdb --landing L --profile full
+#   python tools/gen_copperline_load_fixtures.py \
+#       --fixtures worlds/copperline/workspace/fixtures --db W.duckdb --landing L
+#
+# and then, over `raw.gift_card_ledger` joined to `raw.gift_cards` and
+# `raw.gift_card_jurisdictions`:
+#
+#   breakage entries, all jurisdictions    18,286 entries   197,720,074 cents
+#     of which escheat_applies              9,949           106,935,742
+#     of which recognize                    8,337            90,784,332
+#   escheat exposure, dormancy_months 36   13 jurisdictions  71,125,259
+#   escheat exposure, dormancy_months 60    7 jurisdictions  35,810,483
+#   escheat cards not yet aged out         88,105 cards     644,089,266
+#     36-month tier 423,985,238, 60-month tier 220,104,028
+#   the two together                                        751,025,008
+#   largest jurisdiction by money          US-17 Tennessee    6,444,641
+#   cards raw.gift_cards.status calls expired               11,770
+#     of them, escheating and aged out      1,007            11,637,500
+#
+# The generator moved under this seam once already: an earlier build gave a
+# breakage total of 172,097,500 over 16,205 entries, because a card spent down
+# to a stub broke for nothing rather than for the stub. Anything in
+# worlds/copperline/PLANTED.md quoting ~16,200 entries was measured there.
+# Re-measure before reusing a figure from this seam.
+#
+# The whole exposure is USD and books to CL-US — the 20 escheating
+# jurisdictions are 18 US states plus Quebec and Alberta, and both markets bill
+# in USD — so no rate and no entity split moves any figure here. Worth knowing;
+# not worth a check.
+#
+# Nothing here runs a DAG, so nothing needs replaying first.
+replay: []
+
+checks:
+
+# THE EXPOSURE. 106,935,742 cents: the breakage entries the ledger has already
+# written whose card sits in a jurisdiction where `escheat_applies`. The figure
+# has to sit against the claim it answers rather than merely appear in the
+# file, so a reply that lands elsewhere and mentions it in passing fails.
+#
+# Wrong answers this convicts:
+#   197,720,074  every breakage entry, the escheat column never read. The
+#                jurisdiction table is decoration to this reply.
+#    90,784,332  the other side taken for the exposure — what recognizes as
+#                revenue rather than what goes to a state.
+#   118,242,500  `raw.gift_cards.initial_cents` for the aged-out cards, so a
+#                card spent down to a stub is escheated for its face value.
+#                1,122 of the 9,949 were partly spent and the gap is
+#                11,306,758 cents of money already redeemed. REV-12 says
+#                breakage is the value left on the card.
+#    95,298,242  the cards `raw.gift_cards.status` calls expired dropped as
+#                dead. See the status check below.
+#     9,949      the cards counted instead of the money, which is what the
+#                workbook the ticket is replacing does.
+#
+# Not convicted, and honest either way: testing escheat with
+# `dormancy_months IS NOT NULL` or with `breakage_allowed = false`. Both agree
+# with `escheat_applies` on all 66 rows and give 106,935,742 too. REV-12 says
+# the column is the test; the data does not punish a reader who used a
+# neighbour.
+#
+# The ledger's signs are the liability's, so a reply that leaves the figures
+# negative writes -106,935,742 and still matches. The ticket asks for positive
+# figures; the regex cannot tell, and a minus sign is not the decision this
+# check grades.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'escheat[^0-9\n]{0,60}106[,\s]?935[,\s]?742'
+
+# THE SPLIT IT CAME OUT OF. The recognizing half, 90,784,332, and the ledger's
+# whole breakage, 197,720,074. The ticket asks for both halves and the whole
+# because the exposure alone cannot be checked by anyone: the two figures are
+# what show the reply read the jurisdiction column rather than guessed which
+# side was which. An agent who never joined the jurisdiction table has one of
+# these two and not the other.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b90[,\s]?784[,\s]?332\b'
+  - '\b197[,\s]?720[,\s]?074\b'
+
+# THE TWO DORMANCY TIERS. 71,125,259 over the 13 jurisdictions on 36 months,
+# 35,810,483 over the 7 on 60. They add to the exposure, which is the
+# arithmetic the headline hides, and they are the split the whole open item is
+# about — you cannot say what `dormancy_months` is worth without pricing each
+# value of it.
+#
+# The jurisdiction counts, 13 and 7, are not pinned: a bare "13" in a page of
+# prose matches too much to mean anything. The two cent figures are the
+# decision.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b71[,\s]?125[,\s]?259\b'
+  - '\b35[,\s]?810[,\s]?483\b'
+
+# WHAT IS STILL COMING. 644,089,266 cents on 88,105 escheating cards that have
+# not yet reached 24 months. This is the find in the ticket. The ledger has
+# written breakage for four months of issue cohorts and the book is 28 months
+# long, so a reply that sums breakage entries and stops has priced a seventh of
+# the exposure and called it the answer. The figure is what each card was sold
+# for less what the ledger has taken off it.
+#
+# Wrong answers this convicts:
+#   919,035,000  `initial_cents` with no redemptions subtracted.
+#   751,025,008  the whole escheating book, aged out and not, offered as the
+#                figure the ticket asked for on its own line. It is a true
+#                number and the solution prints it too, but it is not this one.
+#             0  breakage entries counted for cards that have none — which is
+#                what happens to a reply that only ever looks at the ledger.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  # The exact sum, and nothing looser. A parts-stated-together alternative was
+  # tried and withdrawn: the reply it accommodated printed 643,233,654 as the
+  # headline and filed the 855,612 that ages out today on the wrong side of a
+  # line the ticket's first bullet draws — cards whose entry the ledger has not
+  # written have not aged out. Naming both parts with the wrong classification
+  # is the mistake, not the derivation minus the addition; and once the parts
+  # count, the headline figure stops being required at all, which is how a
+  # 751,025,008 headline passed the attack battery.
+  - '\b644[,\s]?089[,\s]?266\b'
+
+# THE FILING DATES, AND THAT THERE IS NOTHING TO FILE. Dormancy runs from the
+# issue date — the ticket says so, so this is the contract and not a reading.
+# The oldest card in either tier was sold on 2024-02-04, which puts the first
+# 36-month balance at 2027-02-04 and the first 60-month one at 2029-02-04. The
+# whole card book is younger than 36 months, so no part of the 106,935,742 is
+# reportable as at 2026-06-15. That conclusion is the one treasury acts on and
+# a reply that prices the exposure without dating it has not answered.
+#
+# Wrong answers this convicts:
+#   2029-02-04 / 2031-02-04  dormancy counted from the age-out date rather than
+#                            from issue, so each tier lands 24 months late. The
+#                            ticket names the anchor.
+#   2026-02-04               the age-out date offered as the due date, which is
+#                            REV-12's revenue date and not a filing date.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '2027-02-04'
+  - '2029-02-04'
+  - '((nothing|none|zero|not one|no cents|no part|no amount|0 cents)[^\n]{0,140}(due|reportable|report|remit|file|filing)|(due|reportable|report|remit|file|filing)[^\n]{0,140}(nothing|none|zero|not one|no cents|no part|no amount|0 cents))'
+
+# THE JURISDICTION CARRYING THE MOST. Tennessee, US-17, 6,444,641 cents on 545
+# cards. Ranking by cards instead of by money names Pennsylvania, which holds
+# 565 cards and 5,770,619 cents — ninth of the 20 by money. The ticket asks for
+# the one carrying the most "by name and by figure", so the name alone does not
+# settle it and neither does an unattached number.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '(tennessee|US-17)'
+  - '\b6[,\s]?444[,\s]?641\b'
+
+# THE STATUS COLUMN. `raw.gift_cards.status` calls 11,770 cards `expired` and
+# not one card in the book has passed its own `expires_at`: every card expires
+# 60 months after issue, so the earliest expiry anywhere is 2029-02-04. 1,007
+# of those cards escheat and have aged out, carrying 11,637,500 cents — about a
+# ninth of the exposure, and what a reply that trusts the OMS word throws away.
+#
+# The check wants the count, the amount, and the year that shows the claim is
+# false. A reply that says "some cards are marked expired" without pricing it
+# has noticed the column and not audited it.
+#
+# 20,137,500 is the same cards' share of ALL breakage, escheating or not. The
+# ticket asks how much of the exposure sits on them, so the exposure figure is
+# the one required; a reply may print both and still passes.
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - '\b11[,\s]?770\b'
+  - '\b11[,\s]?637[,\s]?500\b'
+  - '\b2029\b'
+
+# THE VERDICT ON THE OPEN ITEM, which is what the ticket says the controller is
+# buying the quarter with. `escheat_applies` decides whether a balance is
+# revenue or a state's; `dormancy_months` decides only the date it becomes
+# reportable, and in this book it cannot even change the amount — no card is
+# redeemed after its 24-month age-out, so the balance at 36 and at 60 months is
+# the balance the ledger already wrote at 24.
+#
+# The pattern pins the two column names with the verdict beside each, which is
+# the one sentence the reply exists to produce. A reply that blames
+# `dormancy_months` for the money, or that never names either column, fails.
+# The first pattern accepts any of the plain ways to say "decides the money";
+# the second any of the ways to say "decides only when".
+- kind: file_contains
+  path: RESPONSE.md
+  matches:
+  - 'escheat_applies[^\n]{0,160}(money|revenue|recogni|cents|amount|which side|the state)'
+  - 'dormancy_months[^\n]{0,200}(date|timing|when|calendar|no cent|not a cent|nothing to the|moves no)'

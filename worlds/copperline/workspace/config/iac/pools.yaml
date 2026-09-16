@@ -1,0 +1,30 @@
+# Airflow pools. Applied by plat_config_sync.
+#
+# `warehouse_write` has one slot on purpose: the warehouse is one DuckDB file
+# and it takes one writer. Anything that writes takes the slot; anything that
+# only reads opens a read-only connection and takes nothing.
+
+pools:
+  warehouse_write:
+    slots: 1
+    description: the single warehouse writer. Every writing task takes this
+
+  warehouse_read:
+    slots: 8
+    description: read-only work against the snapshot
+
+  dbt_build:
+    slots: 4
+    description: the cosmos-rendered model tasks
+
+  legacy_ssh:
+    slots: 2
+    description: the old box runs two jobs at once and no more
+
+  vendor_api:
+    slots: 3
+    description: the paged vendor feeds, so a backfill does not open thirty sessions
+
+  export:
+    slots: 4
+    description: the SFTP and file drops

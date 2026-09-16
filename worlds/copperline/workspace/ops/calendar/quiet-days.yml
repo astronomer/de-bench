@@ -1,0 +1,16 @@
+# Days Copperline expects to be quiet, agreed in advance.
+#
+# A window here is a day where low or absent volume is the expected outcome.
+# Anything watching volume or freshness reads this file so that a known quiet
+# day does not page. Owned by growth; add a window before the day, not after.
+#
+# This is not the trading calendar. `raw.market_calendar` holds which markets
+# trade on which dates. This file holds the exceptions somebody agreed.
+
+- date: 2026-02-16
+  reason: regional store holiday, Mountain and Plains regions closed
+  effect: order volume runs 35-40% below a normal Monday
+
+- dates: [2026-03-21, 2026-03-22]
+  reason: planned warehouse migration, feeds paused from 18:00 Friday
+  effect: clickstream and inventory snapshots are absent, not late

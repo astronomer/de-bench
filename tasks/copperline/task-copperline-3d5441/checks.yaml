@@ -1,0 +1,229 @@
+# Five graded dates, and nothing here holds an authored value.
+#
+#   2026-03-08  US spring forward. The local day at a US origin is 23 hours, so
+#               a window of 24 hours from local midnight reaches an hour into
+#               the 9th and publishes that hour twice. The ticket names this one.
+#   2026-03-29  EU spring forward. The ticket does NOT name it: a fix that
+#               special-cases the date finance asked about, or that treats only
+#               the American zones, fails here.
+#   2025-12-10  Outside the repricing window, where the card pinned to the
+#               window's own start date is the wrong card. Brightline and Pallas
+#               move; Merriweather does not, and is graded as the day's control.
+#   2026-02-18  An ordinary day inside the window.
+#   2026-04-15  An ordinary day inside the window. Both are graded by comparison
+#               with the tree as it shipped, so the reprice's 88 good days
+#               cannot be bought by moving the two bad ones.
+#
+# None of these dates falls in a reserved window.
+#
+# The expected result for a graded day is derived, not typed: the query below
+# attaches the warehouse and rates the day off `raw.shipment_packages`,
+# `raw.carrier_rate_cards` and `raw.carrier_fuel_surcharges` under
+# `docs/rate-policy.md` — RATE-1 on the ship date, RATE-3's first break at or
+# above the billable weight, RATE-4's rounding, then fuel on the rounded charge
+# and the accessorial flat on top.
+#
+# Runtime, measured in Modal on this image with two prove runs that differed by
+# five in-window days and nothing else:
+#
+#   1 day  + setup   47 s (solution arm)   66 s (baseline arm)
+#   6 days + setup  185 s                 190 s
+#   per day          27.6 s                24.8 s
+#
+# So one `airflow dags test sc_shipping_cost_daily <ds>` costs about 26 seconds
+# on a day inside the repricing window. The window is ninety of them, about
+# 2,340 seconds of DAG time with nothing else happening, against a wall of
+# 1,500 — so a plan that rebuilds the window by hand cannot finish. The two
+# days that actually moved cost about 52 seconds, and checking every date
+# graded here costs about 130.
+replay: []
+
+checks:
+- kind: dag_parses
+  dag_id: sc_shipping_cost_daily
+
+# The eight tasks stay. Dropping the export, or folding the publish into the
+# rating step, would make the day checks pass for the wrong reason.
+- kind: dag_structure
+  dag_id: sc_shipping_cost_daily
+  task_ids:
+  - ensure_tables
+  - check_card_in_force
+  - rate_packages
+  - park_unrated
+  - apply_surcharges
+  - publish_partition
+  - compare_to_invoice
+  - export_partitions
+  operators:
+    check_card_in_force: PythonOperator
+    apply_surcharges: PythonOperator
+    publish_partition: PythonOperator
+    compare_to_invoice: PythonOperator
+    export_partitions: PythonOperator
+
+# The two ordinary days must not move. The comparison runs the tree as shipped
+# and the tree as patched in one container and holds the two published
+# relations to each other, so nobody types a number.
+- kind: unchanged
+  relations:
+  - marts.fct_shipping_costs
+  - ops.freight_variance
+  run:
+  - sc_shipping_cost_daily
+  ds: '2026-02-18'
+  db: include/data/copperline.duckdb
+- kind: unchanged
+  relations:
+  - marts.fct_shipping_costs
+  - ops.freight_variance
+  run:
+  - sc_shipping_cost_daily
+  ds: '2026-04-15'
+  db: include/data/copperline.duckdb
+
+# US spring forward, the day the ticket names.
+- kind: dag_runs
+  dag_id: sc_shipping_cost_daily
+  ds: '2026-03-08'
+- kind: partition_csv
+  layer: marts
+  name: shipping_costs_brfr
+  ds: '2026-03-08'
+  columns: &cost_columns [package_id, shipment_id, lane_id, origin_dc, zone,
+                          billed_weight_g, card_version, rated_cents, billed_cents]
+  expect_sql: &brfr_day >
+    ATTACH '{workdir}/include/data/copperline.duckdb' AS w (READ_ONLY);
+    WITH rated AS (
+        SELECT p.package_id, p.shipment_id, p.lane_id, p.origin_dc, p.zone,
+               p.billed_weight_g, p.carrier_code, p.ship_date, p.billed_cents,
+               p.accessorial_cents, c.card_version,
+               round(c.base_cents + p.zone * c.zone_step_cents
+                     + c.break_kg * c.weight_step_cents) AS charge_cents
+        FROM w.raw.shipment_packages p
+        JOIN w.raw.carrier_rate_cards c
+          ON c.carrier_code = p.carrier_code
+         AND c.service_level = p.service_level
+         AND c.effective_from <= p.ship_date
+         AND (c.effective_to IS NULL OR c.effective_to > p.ship_date)
+         AND c.break_seq = (
+             SELECT min(b.break_seq) FROM w.raw.carrier_rate_cards b
+             WHERE b.card_version = c.card_version
+               AND b.carrier_code = c.carrier_code
+               AND b.service_level = c.service_level
+               AND p.billed_weight_g <= b.upper_bound_g)
+        WHERE p.ship_date = DATE '{ds}' AND p.carrier_code = 'BRFR'
+    )
+    SELECT r.package_id, r.shipment_id, r.lane_id, r.origin_dc, r.zone,
+           r.billed_weight_g, r.card_version,
+           (r.charge_cents
+            + round(r.charge_cents * coalesce(f.fuel_pct_bps, 0) / 10000.0)
+            + r.accessorial_cents)::BIGINT AS rated_cents,
+           r.billed_cents
+    FROM rated r
+    LEFT JOIN w.raw.carrier_fuel_surcharges f
+      ON f.carrier_code = r.carrier_code
+     AND f.week_start <= r.ship_date
+     AND f.week_start > r.ship_date - INTERVAL 7 DAY
+    ORDER BY r.package_id
+
+# EU spring forward, the day the ticket does not name.
+- kind: dag_runs
+  dag_id: sc_shipping_cost_daily
+  ds: '2026-03-29'
+- kind: partition_csv
+  layer: marts
+  name: shipping_costs_brfr
+  ds: '2026-03-29'
+  columns: *cost_columns
+  expect_sql: *brfr_day
+
+# Outside the window. Brightline is on BL-2025A in December and Pallas on
+# PP-25Q1; both move. Merriweather is on MW-2025H2 either way and must not.
+- kind: dag_runs
+  dag_id: sc_shipping_cost_daily
+  ds: '2025-12-10'
+- kind: partition_csv
+  layer: marts
+  name: shipping_costs_brfr
+  ds: '2025-12-10'
+  columns: *cost_columns
+  expect_sql: *brfr_day
+- kind: partition_csv
+  layer: marts
+  name: shipping_costs_plpc
+  ds: '2025-12-10'
+  columns: *cost_columns
+  expect_sql: >
+    ATTACH '{workdir}/include/data/copperline.duckdb' AS w (READ_ONLY);
+    WITH rated AS (
+        SELECT p.package_id, p.shipment_id, p.lane_id, p.origin_dc, p.zone,
+               p.billed_weight_g, p.carrier_code, p.ship_date, p.billed_cents,
+               p.accessorial_cents, c.card_version,
+               round(c.base_cents + p.zone * c.zone_step_cents
+                     + c.break_kg * c.weight_step_cents) AS charge_cents
+        FROM w.raw.shipment_packages p
+        JOIN w.raw.carrier_rate_cards c
+          ON c.carrier_code = p.carrier_code
+         AND c.service_level = p.service_level
+         AND c.effective_from <= p.ship_date
+         AND (c.effective_to IS NULL OR c.effective_to > p.ship_date)
+         AND c.break_seq = (
+             SELECT min(b.break_seq) FROM w.raw.carrier_rate_cards b
+             WHERE b.card_version = c.card_version
+               AND b.carrier_code = c.carrier_code
+               AND b.service_level = c.service_level
+               AND p.billed_weight_g <= b.upper_bound_g)
+        WHERE p.ship_date = DATE '{ds}' AND p.carrier_code = 'PLPC'
+    )
+    SELECT r.package_id, r.shipment_id, r.lane_id, r.origin_dc, r.zone,
+           r.billed_weight_g, r.card_version,
+           (r.charge_cents
+            + round(r.charge_cents * coalesce(f.fuel_pct_bps, 0) / 10000.0)
+            + r.accessorial_cents)::BIGINT AS rated_cents,
+           r.billed_cents
+    FROM rated r
+    LEFT JOIN w.raw.carrier_fuel_surcharges f
+      ON f.carrier_code = r.carrier_code
+     AND f.week_start <= r.ship_date
+     AND f.week_start > r.ship_date - INTERVAL 7 DAY
+    ORDER BY r.package_id
+- kind: partition_csv
+  layer: marts
+  name: shipping_costs_mwlg
+  ds: '2025-12-10'
+  columns: *cost_columns
+  expect_sql: >
+    ATTACH '{workdir}/include/data/copperline.duckdb' AS w (READ_ONLY);
+    WITH rated AS (
+        SELECT p.package_id, p.shipment_id, p.lane_id, p.origin_dc, p.zone,
+               p.billed_weight_g, p.carrier_code, p.ship_date, p.billed_cents,
+               p.accessorial_cents, c.card_version,
+               round(c.base_cents + p.zone * c.zone_step_cents
+                     + c.break_kg * c.weight_step_cents) AS charge_cents
+        FROM w.raw.shipment_packages p
+        JOIN w.raw.carrier_rate_cards c
+          ON c.carrier_code = p.carrier_code
+         AND c.service_level = p.service_level
+         AND c.effective_from <= p.ship_date
+         AND (c.effective_to IS NULL OR c.effective_to > p.ship_date)
+         AND c.break_seq = (
+             SELECT min(b.break_seq) FROM w.raw.carrier_rate_cards b
+             WHERE b.card_version = c.card_version
+               AND b.carrier_code = c.carrier_code
+               AND b.service_level = c.service_level
+               AND p.billed_weight_g <= b.upper_bound_g)
+        WHERE p.ship_date = DATE '{ds}' AND p.carrier_code = 'MWLG'
+    )
+    SELECT r.package_id, r.shipment_id, r.lane_id, r.origin_dc, r.zone,
+           r.billed_weight_g, r.card_version,
+           (r.charge_cents
+            + round(r.charge_cents * coalesce(f.fuel_pct_bps, 0) / 10000.0)
+            + r.accessorial_cents)::BIGINT AS rated_cents,
+           r.billed_cents
+    FROM rated r
+    LEFT JOIN w.raw.carrier_fuel_surcharges f
+      ON f.carrier_code = r.carrier_code
+     AND f.week_start <= r.ship_date
+     AND f.week_start > r.ship_date - INTERVAL 7 DAY
+    ORDER BY r.package_id

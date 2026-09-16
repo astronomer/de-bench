@@ -1,0 +1,42 @@
+model_training:
+  default_args:
+    start_date: 2024-05-01
+    owner: ml-platform
+  schedule_interval: '0 3 * * *'
+  catchup: false
+  tasks:
+    prepare_dataset:
+      operator: airflow.operators.bash.BashOperator
+      bash_command: echo prepare_dataset
+    train_model:
+      operator: airflow.providers.cncf.kubernetes.operators.pod.KubernetesPodOperator
+      namespace: ml-jobs
+      image: registry.internal/trainer:5.2.0
+      cmds: ["python", "-m", "trainer.run"]
+      name: train-model
+      resources:
+        requests:
+          cpu: "8"
+          memory: 32Gi
+          nvidia.com/gpu: "1"
+        limits:
+          nvidia.com/gpu: "1"
+      volumes:
+        - name: training-data
+          persistent_volume_claim:
+            claim_name: training-data-pvc
+        - name: model-output
+          host_path:
+            path: /mnt/models
+      volume_mounts:
+        - name: training-data
+          mount_path: /data
+          read_only: true
+        - name: model-output
+          mount_path: /models
+      get_logs: true
+      dependencies: [prepare_dataset]
+    register_model:
+      operator: airflow.operators.bash.BashOperator
+      bash_command: echo register_model
+      dependencies: [train_model]

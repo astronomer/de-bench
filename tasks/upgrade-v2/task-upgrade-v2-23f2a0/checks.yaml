@@ -1,0 +1,9 @@
+checks:
+- kind: scoring_primitive
+  name: dag_imports_bundle_safe
+- kind: scoring_primitive
+  name: imports_clean_across_sibling_pkgs
+- kind: scoring_primitive
+  name: triggers_outside_bundle
+- kind: scoring_primitive
+  name: no_deprecated_imports
